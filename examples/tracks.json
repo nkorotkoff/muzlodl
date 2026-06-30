@@ -1,0 +1,26 @@
+[
+  {
+    "artist": "Pink Floyd",
+    "title": "Comfortably Numb",
+    "album": "The Wall",
+    "year": 1979
+  },
+  {
+    "artist": "Tame Impala",
+    "title": "The Less I Know The Better",
+    "album": "Currents",
+    "year": 2015
+  },
+  {
+    "artist": "Kendrick Lamar",
+    "title": "Sing About Me",
+    "album": "good kid, m.A.A.d city",
+    "year": 2012
+  },
+  {
+    "artist": "Daft Punk",
+    "title": "Get Lucky",
+    "album": "Random Access Memories",
+    "year": 2013
+  }
+]

@@ -1,0 +1,13 @@
+# Plain text format: one track per line, "Artist - Title"
+# Lines starting with # are ignored. No album metadata possible.
+
+Nirvana - Smells Like Teen Spirit
+Nirvana - Come As You Are
+Nirvana - Heart-Shaped Box
+Metallica - Enter Sandman
+Metallica - Nothing Else Matters
+System Of A Down - Chop Suey
+System Of A Down - Toxicity
+Rammstein - Du Hast
+Rammstein - Sonne
+Rammstein - Amerika

@@ -1,0 +1,63 @@
+# Environment
+.venv/
+.env
+.venv.bak/
+
+# Build artifacts
+build/
+dist/
+*.spec.bak
+
+# Local install
+.local/
+
+# Downloaded music (huge, regenerable)
+library/
+test_library/
+*.mp3
+*.m4a
+*.webm
+*.opus
+*.flac
+
+# Runtime state/logs
+.loader.log.jsonl
+.loader-state.json
+.doctor-state.json
+.cache/
+.cache/itunes_cache.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Test fixtures / temp
+/tmp_*
+# Input data files at repo root (personal playlists, real exports).
+# Leading slash scopes the pattern to the repo root, so examples/ is safe.
+# Re-include specific files we DO want tracked at root.
+/*.csv
+/*.json
+/!requirements.txt
+*.tmp
+*.bak
+*.swp
+
+# PyInstaller leftovers
+*.manifest
+*.spec.cache
