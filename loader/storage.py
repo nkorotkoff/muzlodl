@@ -29,6 +29,9 @@ from .webdav import WebDAVClient, WebDAVError
 
 log = logging.getLogger(__name__)
 
+# Audio file extensions the uploader will pick up from a library dir.
+AUDIO_EXTS = {".mp3", ".opus", ".m4a", ".flac", ".ogg", ".webm"}
+
 # Per-backend metadata
 BACKENDS = {
     "yandex": {
@@ -112,13 +115,15 @@ class CloudStorage(ABC):
         return count
 
     def _upload_album(self, album_dir: Path, artist: str, album: str) -> bool:
-        tracks = sorted(p for p in album_dir.glob("*.mp3") if p.stat().st_size > 0)
+        tracks = sorted(p for p in album_dir.iterdir()
+                        if p.is_file() and p.suffix.lower() in AUDIO_EXTS
+                        and p.stat().st_size > 0)
         if not tracks:
             return False
         album_remote = f"{self.config.root}/{_safe(artist)}/{_safe(album)}"
         log.info("uploading %d tracks: %s/%s", len(tracks), artist, album)
         for t in tracks:
-            remote = f"{album_remote}/{_safe(t.stem)}.mp3"
+            remote = f"{album_remote}/{_safe(t.stem)}{t.suffix.lower()}"
             try:
                 self.client.upload_streaming(t, remote)
             except WebDAVError as e:
@@ -140,7 +145,8 @@ class CloudStorage(ABC):
         if not local_path.exists() or local_path.stat().st_size == 0:
             return False
         remote = (f"{self.config.root}/{_safe(artist)}/"
-                  f"{_safe(album) if album else 'Singles'}/{_safe(title)}.mp3")
+                  f"{_safe(album) if album else 'Singles'}/"
+                  f"{_safe(title)}{local_path.suffix.lower()}")
         # Use a longer timeout for big files
         old_timeout = self.client.timeout
         size_mb = local_path.stat().st_size / (1024 * 1024)
@@ -225,6 +231,21 @@ class YandexRestClient:
         parts = [quote(p, safe="") for p in path.split("/") if p]
         return f"{self.base}/" + "/".join(parts)
 
+    def exists(self, remote_path: str) -> Optional[int]:
+        """Return size of remote file if it exists, else None."""
+        from urllib.parse import quote
+        if not remote_path.startswith("/"):
+            remote_path = "/" + remote_path
+        encoded = quote(remote_path, safe="/:")
+        r = self.session.get(
+            f"{self.base}/resources",
+            params={"path": remote_path},
+            timeout=30,
+        )
+        if r.status_code == 200:
+            return r.json().get("size", 0)
+        return None
+
     def get_upload_url(self, remote_path: str, overwrite: bool = True) -> str:
         """Ask Yandex for a one-shot upload URL. Returns the href to PUT to.
 
@@ -251,22 +272,31 @@ class YandexRestClient:
             raise RuntimeError(f"yandex REST: no href in {data}")
         return data["href"]
 
-    def upload(self, local_path: Path, remote_path: str) -> bool:
+    def upload(self, local_path: Path, remote_path: str, skip_existing: bool = True) -> bool:
         """Upload a file via the REST API. Returns True on success.
 
         Before asking for an upload URL, ensures all parent directories
         exist (mkdir is idempotent on 409 Already Exists).
+
+        If `skip_existing` is True and the remote file already has the same
+        size as the local one, returns True without re-uploading. This is
+        cheap and avoids burning the user's traffic on identical re-runs.
         """
         local_path = Path(local_path)
         if not local_path.exists() or local_path.stat().st_size == 0:
             return False
+        size = local_path.stat().st_size
+        # Cheap skip: same size on the other side => assume same content
+        if skip_existing:
+            remote_size = self.exists(remote_path)
+            if remote_size is not None and remote_size == size:
+                return True
         # Ensure parent dirs exist. mkdir is recursive + idempotent.
         parent = "/".join(remote_path.strip("/").split("/")[:-1])
         if parent:
             self.mkdir(parent)
         # Ask Yandex where to PUT
         upload_url = self.get_upload_url(remote_path)
-        size = local_path.stat().st_size
         with open(local_path, "rb") as f:
             r = requests.put(
                 upload_url,
@@ -352,7 +382,9 @@ class YandexDiskRESTStorage(CloudStorage):
 
     # --- override the WebDAV-based _upload_album to use the REST client ---
     def _upload_album(self, album_dir: Path, artist: str, album: str) -> bool:
-        tracks = sorted(p for p in album_dir.glob("*.mp3") if p.stat().st_size > 0)
+        tracks = sorted(p for p in album_dir.iterdir()
+                        if p.is_file() and p.suffix.lower() in AUDIO_EXTS
+                        and p.stat().st_size > 0)
         if not tracks:
             return False
         album_remote = f"{self.config.root}/{_safe(artist)}/{_safe(album)}"
@@ -360,7 +392,7 @@ class YandexDiskRESTStorage(CloudStorage):
         # Ensure the album folder exists
         self.client.mkdir(album_remote)
         for t in tracks:
-            remote = f"{album_remote}/{_safe(t.stem)}.mp3"
+            remote = f"{album_remote}/{_safe(t.stem)}{t.suffix.lower()}"
             try:
                 self.client.upload(t, remote)
             except Exception as e:
@@ -375,7 +407,8 @@ class YandexDiskRESTStorage(CloudStorage):
         if not local_path.exists() or local_path.stat().st_size == 0:
             return False
         remote = (f"{self.config.root}/{_safe(artist)}/"
-                  f"{_safe(album) if album else 'Singles'}/{_safe(title)}.mp3")
+                  f"{_safe(album) if album else 'Singles'}/"
+                  f"{_safe(title)}{local_path.suffix.lower()}")
         for attempt in range(retries + 1):
             try:
                 self.client.upload(local_path, remote)
