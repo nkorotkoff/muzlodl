@@ -16,6 +16,25 @@ let state = {
   query: '', status: '', sort: 'artist', order: 'asc',
 };
 
+// ---- Filter persistence (survives page reloads) ----
+const FILTERS_KEY = 'library-filters';
+function saveFilters() {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({
+      query: state.query, sort: state.sort, order: state.order,
+    }));
+  } catch (e) {}
+}
+function restoreFilters() {
+  try {
+    const f = JSON.parse(localStorage.getItem(FILTERS_KEY) || 'null');
+    if (!f) return;
+    if (typeof f.query === 'string') state.query = f.query;
+    if (typeof f.sort === 'string') state.sort = f.sort;
+    if (typeof f.order === 'string') state.order = f.order;
+  } catch (e) {}
+}
+
 // ---- API ----
 async function api(path, opts) {
   const r = await fetch(path, {
@@ -161,6 +180,7 @@ function playTrack(id, artist, title) {
 }
 
 function doPlay(id, artist, title) {
+  playRecorded = false;  // new track = new listen
   document.getElementById('player-artist').textContent = artist;
   document.getElementById('player-title').textContent = title;
   audio.src = `/api/library/${id}/stream`;
@@ -240,10 +260,24 @@ document.getElementById('volume-slider').addEventListener('input', function() {
 });
 
 // Audio events
+let playRecorded = false;  // one listen per track play (reset in doPlay)
+
 audio.addEventListener('timeupdate', () => {
   if (audio.duration) {
     document.getElementById('progress-fill').style.width = (audio.currentTime / audio.duration * 100) + '%';
     document.getElementById('player-current').textContent = fmtTime(audio.currentTime);
+  }
+  // Record the listen once we've actually listened to a meaningful chunk
+  // (>=30s and >=30% of the track) — not only when the track ends. Testing
+  // and skips count too.
+  if (!playRecorded && currentTrackId && audio.currentTime >= 30 &&
+      audio.duration && audio.currentTime >= audio.duration * 0.3) {
+    playRecorded = true;
+    fetch('/api/plays', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({track_id: currentTrackId}),
+    }).catch(() => {});
   }
 });
 audio.addEventListener('loadedmetadata', () => {
@@ -251,14 +285,8 @@ audio.addEventListener('loadedmetadata', () => {
     document.getElementById('player-duration').textContent = fmtTime(audio.duration);
 });
 audio.addEventListener('ended', () => {
-  // Record the listen (fire-and-forget, don't block next track)
-  if (currentTrackId) {
-    fetch('/api/plays', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({track_id: currentTrackId}),
-    }).catch(() => {});
-  }
+  // Listen already recorded in timeupdate once the 30s/30% threshold was
+  // crossed; nothing extra to do here.
   if (shuffleMode) { nextTrack(); return; }
   if (queue.length > 1) { nextTrack(); return; }
   document.getElementById('play-btn').textContent = '▶';
@@ -616,10 +644,10 @@ function toast(msg, err) {
 
 // ---- Events ----
 document.getElementById('search').addEventListener('input', debounce(() => {
-  state.query = document.getElementById('search').value; state.offset = 0; loadLibrary();
+  state.query = document.getElementById('search').value; state.offset = 0; saveFilters(); loadLibrary();
 }, 300));
 document.querySelectorAll('.sortable').forEach(th => {
-  th.addEventListener('click', () => { state.sort = th.dataset.sort; state.offset = 0; loadLibrary(); });
+  th.addEventListener('click', () => { state.sort = th.dataset.sort; state.offset = 0; saveFilters(); loadLibrary(); });
 });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
@@ -728,6 +756,11 @@ function restorePlayerState() {
 
 audio.volume = parseFloat(document.getElementById('volume-slider').value);
 document.getElementById('shuffle-btn').style.opacity = '0.5';
+restoreFilters();
+// Reflect restored filters in the controls before the first render.
+document.getElementById('search').value = state.query;
+document.getElementById('sort-by').value = state.sort;
+document.getElementById('sort-order').textContent = state.order === 'asc' ? '↑ Asc' : '↓ Desc';
 loadStats(); loadLibrary();
 restorePlayerState();
 
@@ -798,12 +831,14 @@ function toggleSortOrder() {
   const btn = document.getElementById('sort-order');
   btn.textContent = state.order === 'asc' ? '↑ Asc' : '↓ Desc';
   state.offset = 0;
+  saveFilters();
   loadLibrary();
 }
 
 document.getElementById('sort-by').addEventListener('change', () => {
   state.sort = document.getElementById('sort-by').value;
   state.offset = 0;
+  saveFilters();
   loadLibrary();
 });
 

@@ -260,6 +260,7 @@ def _run_download(job_id: str) -> None:
                     file_path=file_path,
                     file_size=file_size,
                     source_name=source_name or "",
+                    duration=float(track.get("_duration") or 0),
                 )
                 # Dedup: each track must have exactly ONE completed record.
                 # Old runs leave cached/ok rows behind; drop them so the

@@ -30,7 +30,8 @@ def add(
 
 
 def update_status(track_id: int, status: str, file_path: str = "",
-                   file_size: int = 0, source_name: str = "") -> None:
+                   file_size: int = 0, source_name: str = "",
+                   duration: float = 0) -> None:
     # The pipeline hands us absolute paths; the DB convention is relative
     # to the library root. Normalize here so every caller stays consistent.
     if file_path:
@@ -50,6 +51,9 @@ def update_status(track_id: int, status: str, file_path: str = "",
         if source_name:
             updates.append("source_name=?")
             params.append(source_name)
+        if duration:
+            updates.append("duration=?")
+            params.append(float(duration))
         params.append(track_id)
         conn.execute(
             f"UPDATE tracks SET {', '.join(updates)} WHERE id=?", params

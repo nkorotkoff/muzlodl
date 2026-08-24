@@ -51,13 +51,15 @@ VERSION_MARKERS = [
     r"\bacoustic\b", r"\bkaraoke\b", r"\bdemo\b", r"\bslowed\b",
     r"\bspeed[\s\-_]?up\b", r"\bbootleg\b", r"\bparody\b", r"\btribute\b",
     r"\bnightcore\b", r"\b8[\s\-_]?bit\b", r"\blo[\s\-_]?fi\b",
-    r"\bsped up\b", r"\bslowed and reverb\b", r"\bchipmunks?\b",
+    r"\bsped up\b", r"\bslowed and reverb\b", r"\bchopped\b",
+    r"\bscrewed\b", r"\bchipmunks?\b",
     r"\bbass boosted\b", r"\bmashup\b", r"\bedit version\b",
     r"\bremastered mix\b", r"\b8d audio\b", r"\bremix edit\b",
     r"\bdj set\b", r"\bmegamix\b", r"\bradio edit\b",
     r"\bremaster(?:ed)?\b", r"\bремастер\b",
     # Russian equivalents
     r"\bкавер\b", r"\bремикс\b", r"\bминус\b", r"\bкараоке\b",
+    r"\bпеределанн\w*\b", r"\bпеределка\b", r"\bперепевк\w*\b",
     r"\bинструментал\b", r"\bвживую\b", r"\bконцерт\b",
     # Video-only uploads (clips with extra audio, lyric videos, rips)
     r"\bofficial video\b", r"\bofficial audio\b", r"\bmusic video\b",
@@ -66,6 +68,39 @@ VERSION_MARKERS = [
 ]
 
 _MARKER_RE = [re.compile(p) for p in VERSION_MARKERS]
+
+#: Video-form markers ("official video", "клип", ...) mark the FORM of an
+#: upload, not a different recording — the clip carries the same audio as
+#: the track. Used as a last-resort fallback for tracks that only exist on
+#: youtube as clips (many popular songs). Version markers (remix/live/…)
+#: are NEVER bypassed.
+VIDEO_MARKERS = [
+    r"\bofficial video\b", r"\bofficial music video\b", r"\bmusic video\b",
+    r"\blyric video\b", r"\blyrics?\b", r"\bклип\b", r"\bвидеоклип\b",
+    r"\bвидео\b", r"\b4k\b", r"\b1080p\b", r"\b720p\b",
+]
+_VIDEO_RE = [re.compile(p) for p in VIDEO_MARKERS]
+
+
+def is_video_only_version(title: str, wanted_title: str = "") -> bool:
+    """True if `title`'s ONLY version markers are video-form markers.
+
+    "NEVERLOVE — ЛИСИЙ-КИСИЙ (Official Music Video)" is the track itself
+    (clip form); "… (Live)" or "… (Remix)" are different recordings.
+    """
+    if not title:
+        return False
+    t = _soft_norm(title)
+    if not any(rx.search(t) for rx in _VIDEO_RE):
+        return False
+    t_nv = t
+    for rx in _VIDEO_RE:
+        t_nv = rx.sub(" ", t_nv)
+    w = _soft_norm(wanted_title)
+    for rx in _MARKER_RE:
+        if rx.search(t_nv) and not rx.search(w):
+            return False  # a real version marker remains → not video-only
+    return True
 
 #: Technical noise in upload titles — bitrate/container tags ("MP3 320",
 #: "320kbps", "flac") and site stamps. Unlike VERSION_MARKERS these are
@@ -264,7 +299,21 @@ def candidate_ok(
                     break
     if not title_matches(want_title, cand):
         return False
-    if is_bad_version(cand_title, want_title):
+    # A cover marker on a candidate that IS the requested artist is the
+    # track itself: "Seether - Careless Whisper (George Michael Cover)" is
+    # Seether covering Careless Whisper — exactly what was asked for.
+    # Covers by OTHER artists stay rejected. A "cover" word in the ARTIST
+    # name means a cover channel ("УВУЛА (Cover шАг)") — never the artist.
+    want_n = _norm(want_artist)
+    cand_v = cand_title
+    # _norm strips parens; a "cover" inside them ("УВУЛА (Cover шАг)")
+    # would vanish — use the paren-preserving form.
+    cover_in_artist = bool(re.search(r"\bcover\b|\bкавер\b", _soft_norm(cand_artist)))
+    if want_n and not cover_in_artist and (
+        want_n in _norm(cand_title) or want_n in _norm(cand_artist)
+    ):
+        cand_v = re.sub(r"\bcover\b|\bкавер\b", " ", cand_title, flags=re.I)
+    if is_bad_version(cand_v, want_title):
         return False
     if want_artist and cand_artist:
         wa = _norm(want_artist)

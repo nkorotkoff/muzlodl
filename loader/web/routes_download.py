@@ -38,13 +38,26 @@ def api_import_detail(sid: int):
     session_data = db.get_session(sid)
     if not session_data:
         return jsonify({"error": "not found"}), 404
+    limit = request.args.get("limit", type=int, default=100)
+    limit = max(1, min(limit, 500))
+    offset = request.args.get("offset", type=int, default=0)
+    offset = max(0, offset)
     with db.tx() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM tracks WHERE session_id=?", (sid,)
+        ).fetchone()[0]
         rows = conn.execute(
             "SELECT id, artist, title, album, status, source_name "
-            "FROM tracks WHERE session_id=? ORDER BY id",
-            (sid,),
+            "FROM tracks WHERE session_id=? ORDER BY id LIMIT ? OFFSET ?",
+            (sid, limit, offset),
         ).fetchall()
-    return jsonify({"session": session_data, "tracks": [dict(r) for r in rows]})
+    return jsonify({
+        "session": session_data,
+        "tracks": [dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @bp.route("/api/download", methods=["POST"])
@@ -244,6 +257,8 @@ def api_retry_failed():
             album=t.get("album", ""),
             status="pending",
         )
+    # Persist like regular downloads so a restart resumes this job.
+    db.create_job(job_id, session_id, "Retry failed", {})
 
     # Load current settings
     settings = db.get_all_settings()
@@ -298,6 +313,7 @@ def api_retry_failed():
                     file_path=file_path,
                     file_size=file_size,
                     source_name=source_name or "",
+                    duration=float(track.get("_duration") or 0),
                 )
                 # Keep exactly one completed record per track (see app.py).
                 if db_status in ("ok", "cached"):

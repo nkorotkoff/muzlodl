@@ -280,6 +280,7 @@ class Pipeline:
             self.stats["cached"] += 1
             track["_file_path"] = str(out_path)
             track["_file_size"] = out_path.stat().st_size
+            track["_duration"] = self._get_duration(out_path)
             self._log(track, "cached", None)
             return True
 
@@ -295,12 +296,20 @@ class Pipeline:
                     track["_file_size"] = Path(dup_path).stat().st_size
                 except OSError:
                     pass
+                track["_duration"] = self._get_duration(Path(dup_path))
                 self._log(track, "cached", None)
                 return True
 
-        from .match import candidate_ok
+        from .match import candidate_ok, is_bad_version
 
         expected = track.get("duration")
+        # When iTunes/MusicBrainz gave no expected duration (common for
+        # Russian/obscure tracks), derive one from the candidates: the
+        # duration shared by several copies is the real track length
+        # (user rule: "same length across candidates = pick one of them").
+        # Slowed/sped-up/remix copies distort the length, so exclude them.
+        # The pipeline sets `expected` BEFORE searching, so compute it in
+        # the first pass right after the search below.
         # Search ALL sources in parallel: sequential probing costs ~5-10s
         # per source per failed track (6 sources x 2-4s each = ~30s of pure
         # waiting). Downloads stay serial per track — sources rate-limit.
@@ -312,6 +321,38 @@ class Pipeline:
             }
             for fut in as_completed(futs):
                 cands_by_src[futs[fut]] = fut.result()
+
+        # The WANTED title is the raw CSV value (pre-enrichment); version
+        # markers inside it are part of the requested name.
+        want_title = track.get("raw_title") or title
+        want_artist = track.get("raw_artist") or artist
+
+        if not expected:
+            # Consensus duration: bucket candidate lengths (3s = ±1.5s
+            # tolerance), exclude length-distorting versions, and take the
+            # most frequent bucket — several copies agreeing on a length is
+            # the real recording. A video clip has the same length as the
+            # audio, so it votes the same way; slowed/pitch copies land in
+            # their own sparse buckets.
+            from .match import is_bad_version as _is_bad
+            buckets: dict = {}
+            for _src in self.sources:
+                for info in cands_by_src.get(_src) or []:
+                    if not info.duration or info.duration <= 0:
+                        continue
+                    raw = (info.extra or {}).get("raw_title") or info.title or ""
+                    if _is_bad(raw, want_title):
+                        continue
+                    key = round(info.duration / 3.0)
+                    buckets[key] = buckets.get(key, 0) + 1
+            if buckets:
+                best_key = max(buckets, key=buckets.get)
+                if buckets[best_key] >= 2:
+                    expected = best_key * 3.0
+                    log.info("  consensus expected duration: %.0fs (%d copies)",
+                             expected, buckets[best_key])
+                else:
+                    log.info("  no consensus duration (single copies), duration check disabled")
         # Merge candidates from ALL sources into one pool, then sort by
         # reliability:
         #   1. CONSENSUS — copies sharing the same duration are likely the
@@ -362,8 +403,6 @@ class Pipeline:
                 extra = info.extra or {}
                 cand_title = extra.get("raw_title") or info.title or ""
                 cand_artist = extra.get("raw_artist") or info.artist or ""
-                want_title = track.get("raw_title") or title
-                want_artist = track.get("raw_artist") or artist
                 if not candidate_ok(want_artist, want_title, cand_title, cand_artist):
                     log.info("  %s: skipped candidate %r (version/cover/clip)",
                              src.name, cand_title[:60])
@@ -373,36 +412,24 @@ class Pipeline:
                 tried_by_src[src.name] = tried_by_src.get(src.name, 0) + 1
                 if tried_by_src[src.name] > self.config.max_candidates_per_source:
                     continue
-                for attempt in range(self.config.retries + 1):
-                    try:
-                        if src.download(info, out_path):
-                            # Some sources (archive.org MP4, iTunes m4a) deliver
-                            # audio inside a non-MP3 container. Transcode to MP3.
-                            converted = self._transcode_to_mp3(out_path)
-                            if info.is_preview:
-                                log.info("  %s: got preview (degraded)", src.name)
-                                return self._accept_track(track, info, out_path, src)
-                            if not self._check_duration(
-                                out_path, expected_seconds=track.get("duration")
-                            ):
-                                log.info("  %s: duration mismatch, next candidate", src.name)
-                                try:
-                                    out_path.unlink()
-                                except OSError:
-                                    pass
-                                break  # try next candidate from this source
-                            return self._accept_track(track, info, out_path, src)
-                        log.info("  %s: download failed, trying next", src.name)
-                        break
-                    except Exception as e:
-                        log.warning("  %s attempt %d: %s", src.name, attempt + 1, e)
-                        if attempt < self.config.retries:
-                            time.sleep(2 ** attempt)
-                    except KeyboardInterrupt:
-                        raise
-                    except BaseException as e:
-                        log.warning("  %s crashed: %s", src.name, e)
-                        break
+                if self._try_candidate(track, src, info, out_path, expected):
+                    return True
+
+        # Last-resort fallback: tracks that exist on youtube ONLY as clips
+        # ("Official Music Video") — the clip carries the same audio, and
+        # many popular songs have no non-video upload. Video-form markers
+        # are bypassed here; real version markers (live/remix/slowed/cover)
+        # are NOT.
+        from .match import is_video_only_version
+        for src, info in all_cands:
+            raw = (info.extra or {}).get("raw_title") or info.title or ""
+            ra = (info.extra or {}).get("raw_artist") or ""
+            if candidate_ok(want_artist, want_title, raw, ra):
+                continue  # already tried above
+            if not is_video_only_version(raw, want_title):
+                continue
+            if self._try_candidate(track, src, info, out_path, expected):
+                return True
 
         for src in self.sources:
             if not tried_by_src.get(src.name):
@@ -411,6 +438,38 @@ class Pipeline:
         log.error("  FAILED: %s - %s", artist or "?", title)
         self.stats["failed"] += 1
         self._log(track, "failed", None)
+        return False
+
+    def _try_candidate(self, track: dict, src, info, out_path: Path, expected) -> bool:
+        """Download one candidate and validate it (duration). True = accepted."""
+        for attempt in range(self.config.retries + 1):
+            try:
+                if src.download(info, out_path):
+                    # Some sources (archive.org MP4, iTunes m4a) deliver
+                    # audio inside a non-MP3 container. Transcode to MP3.
+                    converted = self._transcode_to_mp3(out_path)
+                    if info.is_preview:
+                        log.info("  %s: got preview (degraded)", src.name)
+                        return self._accept_track(track, info, out_path, src)
+                    if not self._check_duration(out_path, expected_seconds=expected):
+                        log.info("  %s: duration mismatch, next candidate", src.name)
+                        try:
+                            out_path.unlink()
+                        except OSError:
+                            pass
+                        return False
+                    return self._accept_track(track, info, out_path, src)
+                log.info("  %s: download failed, trying next", src.name)
+                return False
+            except Exception as e:
+                log.warning("  %s attempt %d: %s", src.name, attempt + 1, e)
+                if attempt < self.config.retries:
+                    time.sleep(2 ** attempt)
+            except KeyboardInterrupt:
+                raise
+            except BaseException as e:
+                log.warning("  %s crashed: %s", src.name, e)
+                return False
         return False
 
     def _accept_track(self, track: dict, info, out_path: Path, src) -> bool:
@@ -461,6 +520,7 @@ class Pipeline:
         track["_file_path"] = str(out_path)
         if out_path.exists():
             track["_file_size"] = out_path.stat().st_size
+        track["_duration"] = self._get_duration(out_path)
         self._log(track, "ok", src.name)
         return True
 
@@ -533,12 +593,12 @@ class Pipeline:
            as a "track" has no duration — reject, don't accept blindly).
         2. A hard floor: anything shorter than 60s is a preview/clip.
         3. If we have an expected duration (from iTunes/MusicBrainz) and
-           the file is >1.15x or <0.85x that length, it's almost certainly a
+           the file is >1.05x or <0.95x that length, it's almost certainly a
            different recording (full album, short preview, live medley, or
            fan-edit). Without an expected duration, a hard ceiling of
            10 minutes catches albums/compilations.
 
-        The 0.85/1.15 band is tight: fake uploads often carry the right
+        The 0.95/1.05 band is tight: fake uploads often carry the right
         title AND a plausible length but are a different recording
         (lightaudio "Para-dox - Последнее слово" came in at 255s vs the
         real 214s = ratio 1.19, inside the old 0.7/1.3 band). Studio
@@ -560,7 +620,7 @@ class Pipeline:
                 return False
             return True
         ratio = actual / expected_seconds
-        if ratio > 1.15 or ratio < 0.85:
+        if ratio > 1.05 or ratio < 0.95:
             log.info("    duration: %ds actual vs %ds expected (ratio %.2fx, rejected)",
                      int(actual), int(expected_seconds), ratio)
             return False

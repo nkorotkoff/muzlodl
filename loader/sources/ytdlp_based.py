@@ -152,6 +152,7 @@ class YTDLPBasedSource(Source):
                     artist=artist,
                     title=title,
                     album=album or entry.get("album", ""),
+                    duration=entry.get("duration") or None,
                     match_score=score,
                     # raw_artist is intentionally EMPTY: on video platforms
                     # the "artist" is the uploader channel (VEVO, compilations,
