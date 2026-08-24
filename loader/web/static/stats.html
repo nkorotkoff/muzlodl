@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stats — music-loader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="/" class="logo">♫ music-loader</a>
+  <a href="/import">Import</a>
+  <a href="/">Library</a>
+  <a href="/search">Search</a>
+  <a href="/stats">Stats</a>
+  <a href="/history">History</a>
+  <a href="/settings">Settings</a>
+  <div class="nav-jobs" id="nav-jobs" style="margin-left:auto">
+    <button class="btn-action" onclick="toggleJobsPanel()" id="jobs-toggle" style="display:none">⏳ <span id="jobs-count">0</span></button>
+    <div class="jobs-panel" id="jobs-panel" style="display:none"></div>
+  </div>
+</nav>
+
+<main>
+  <header class="page-header">
+    <h1>Listening stats</h1>
+    <span class="stats" id="summary-stats"></span>
+  </header>
+
+  <div class="stats-grid">
+    <div class="card">
+      <h3>Top tracks</h3>
+      <div id="top-tracks" class="stats-list"></div>
+    </div>
+    <div class="card">
+      <h3>Top artists</h3>
+      <div id="top-artists" class="stats-list"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <h3>Recently played</h3>
+    <div id="recent-list" class="stats-list"></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+<script src="/static/js/csrf.js"></script>
+<script src="/static/js/stats.js"></script>
+</body>
+</html>

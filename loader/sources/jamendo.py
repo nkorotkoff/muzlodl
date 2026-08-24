@@ -76,6 +76,7 @@ class JamendoSource(Source):
                     duration=t.get("duration", 0),
                     cover_url=t.get("album_image", ""),
                     match_score=s,
+                    extra={"raw_title": got_title, "raw_artist": got_artist},
                 )
         except Exception as e:
             log.warning(f"[jamendo] search failed: {e}")

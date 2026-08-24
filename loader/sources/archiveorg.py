@@ -13,8 +13,8 @@ import re
 from pathlib import Path
 from typing import Iterator, List, Optional
 
+from ..match import is_bad_version as _is_bad_version
 from .base import Source, TrackInfo
-from .ytdlp_based import _is_bad_version
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class ArchiveOrgSource(Source):
         scored = []
         for d in docs:
             title_text = d.get("title", "") or ""
-            if _is_bad_version(title_text):
+            if _is_bad_version(title_text, wanted_title=title):
                 continue
             s = _score_result(d, artist, title)
             scored.append((d, s))
@@ -150,7 +150,9 @@ class ArchiveOrgSource(Source):
                 duration=_parse_length(chosen.get("length")),
                 match_score=score,
                 extra={"identifier": identifier, "format": chosen.get("format", ""),
-                       "bitrate_kbps": bitrate},
+                       "bitrate_kbps": bitrate,
+                       "raw_title": doc.get("title") or title,
+                       "raw_artist": creator or artist},
             )
         except Exception as e:
             log.debug(f"[archiveorg] resolve {identifier} failed: {e}")

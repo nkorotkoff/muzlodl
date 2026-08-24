@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Search — music-loader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="/" class="logo">♫ music-loader</a>
+  <a href="/import">Import</a>
+  <a href="/">Library</a>
+  <a href="/search">Search</a>
+  <a href="/stats">Stats</a>
+  <a href="/history">History</a>
+  <a href="/settings">Settings</a>
+  <div class="nav-jobs" id="nav-jobs" style="margin-left:auto">
+    <button class="btn-action" onclick="toggleJobsPanel()" id="jobs-toggle" style="display:none">⏳ <span id="jobs-count">0</span></button>
+    <div class="jobs-panel" id="jobs-panel" style="display:none"></div>
+  </div>
+</nav>
+
+<main>
+  <header class="page-header"><h1>Search sources</h1></header>
+
+  <div class="search-box">
+    <input type="search" id="search-input" placeholder="Artist — Title" autofocus>
+    <button onclick="doSearch()" class="btn-primary" style="margin-top:0">🔍 Search</button>
+  </div>
+  <p class="hint">Examples: <code>Bon Jovi — Livin' On A Prayer</code> or just <code>Never Gonna Give You Up</code></p>
+
+  <div id="results" style="display:none">
+    <div class="toolbar">
+      <span id="result-count" class="count"></span>
+      <button onclick="downloadSelected()" id="dl-selected" class="btn-primary" style="margin-top:0;font-size:.85rem;padding:.4rem 1rem">⬇ Download selected</button>
+    </div>
+    <div id="results-list"></div>
+  </div>
+
+  <div id="progress" style="display:none">
+    <h3>Download progress</h3>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <p id="progress-text"></p>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<!-- Preview player -->
+<div id="player" style="display:none">
+  <div class="player-inner">
+    <button class="player-btn" onclick="closePreview()" title="Close">✕</button>
+    <button class="player-btn" id="preview-play-btn" onclick="togglePreviewPlay()" title="Play/Pause">⏸</button>
+    <div class="player-info">
+      <span id="player-artist" class="player-artist">Preview</span>
+      <span id="player-title" class="player-title"></span>
+    </div>
+    <div class="player-progress-wrap">
+      <span id="player-current" class="player-time">0:00</span>
+      <div class="player-progress" onclick="seek(event)">
+        <div class="player-progress-track">
+          <div class="player-progress-fill" id="player-progress-fill"></div>
+        </div>
+      </div>
+      <span id="player-duration" class="player-time">0:00</span>
+    </div>
+    <div class="player-volume">
+      <span class="volume-icon">🔊</span>
+      <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8">
+    </div>
+  </div>
+  <audio id="preview-audio" preload="none"></audio>
+</div>
+</main>
+
+<div id="toast"></div>
+
+<script src="/static/js/csrf.js"></script>
+<script src="/static/js/search.js"></script>
+</body>
+</html>

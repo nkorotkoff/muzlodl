@@ -79,7 +79,8 @@ class YandexMusicSource(Source):
                     duration=(t.duration_ms or 0) / 1000,
                     cover_url=cover,
                     match_score=s,
-                    extra={"id": str(t.id), "real_id": t.real_id},
+                    extra={"id": str(t.id), "real_id": t.real_id,
+                           "raw_title": t.title, "raw_artist": track_artists},
                 )
         except Exception as e:
             log.warning(f"[yandex] search failed: {e}")

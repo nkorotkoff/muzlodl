@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup — music-loader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<div class="card" style="width:320px">
+  <h3>music-loader</h3>
+  <p class="hint" style="margin-top:.25rem">First run — create the admin account</p>
+  <label>Username <input type="text" id="setup-username" placeholder="admin" autocomplete="username"></label>
+  <label style="margin-top:.5rem">Password <input type="password" id="setup-password" placeholder="min 8 chars" autocomplete="new-password"></label>
+  <label style="margin-top:.5rem">Confirm <input type="password" id="setup-confirm" placeholder="repeat password" autocomplete="new-password"></label>
+  <button class="btn-primary" style="width:100%;margin-top:.5rem" onclick="doSetup()">Create admin</button>
+  <p id="setup-error" style="color:#ff7b72;margin-top:.5rem;display:none"></p>
+</div>
+
+<script src="/static/js/csrf.js"></script>
+<script src="/static/js/setup.js"></script>
+</body>
+</html>

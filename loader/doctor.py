@@ -204,6 +204,38 @@ def test_itunes() -> SourceHealth:
     return h
 
 
+def test_lightaudio() -> SourceHealth:
+    h = SourceHealth(name="lightaudio")
+    # LightAudio serves a JS-rendered search results page, but the
+    # /static/ endpoints work without JS too. Probe the search URL.
+    code, ms, err = _timed("https://web.ligaudio.ru/mp3/test")
+    h.latency_ms = ms
+    if code == 200:
+        h.available = True
+        h.can_search = True
+        h.can_download = True
+        h.extras["note"] = "direct MP3 links, Russian/CIS music, no ads"
+    else:
+        h.reason = f"HTTP {code} {err}"
+    return h
+
+
+def test_mp3party() -> SourceHealth:
+    h = SourceHealth(name="mp3party")
+    # Direct MP3 links in search HTML (dl2.mp3party.net/online/<id>.mp3).
+    # Probe the search page; downloadability is implied by the link format.
+    code, ms, err = _timed("https://mp3party.net/search?q=test")
+    h.latency_ms = ms
+    if code == 200:
+        h.available = True
+        h.can_search = True
+        h.can_download = True
+        h.extras["note"] = "direct MP3 links, Russian/CIS music"
+    else:
+        h.reason = f"HTTP {code} {err}"
+    return h
+
+
 # Map name -> test function (some need config)
 TEST_FUNCTIONS = {
     "archiveorg": test_archiveorg,
@@ -218,6 +250,8 @@ TEST_FUNCTIONS = {
     "bilibili": test_bilibili,
     "dailymotion": test_dailymotion,
     "itunes": test_itunes,
+    "lightaudio": test_lightaudio,
+    "mp3party": test_mp3party,
 }
 
 

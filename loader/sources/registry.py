@@ -6,15 +6,15 @@ from typing import List
 
 from .base import Source
 from .ytdlp_based import YouTubeSource, BandcampSource, SoundCloudSource
-from .ytdlp_extras import BilibiliSource, DailymotionSource
+from .ytdlp_extras import DailymotionSource
 from .yandex import YandexMusicSource
 from .jamendo import JamendoSource
-from .audius import AudiusSource
 from .archiveorg import ArchiveOrgSource
+from .lightaudio import LightAudioSource
+from .mp3party import MP3PartySource
+from .zaycev import ZaycevSource
 from .musicbrainz import MusicBrainzEnricher
 from .itunes import ITunesEnricher, ITunesPreviewSource
-from .openverse import OpenverseSource
-from .wikicommons import WikimediaCommonsSource
 
 log = logging.getLogger(__name__)
 
@@ -26,19 +26,25 @@ def default_sources(config, enabled: List[str] = None) -> List[Source]:
 
     builders = {
         "yandex": lambda: YandexMusicSource(config.yandex_token),
-        "audius": lambda: AudiusSource(),
         "archiveorg": lambda: ArchiveOrgSource(),
-        "openverse": lambda: OpenverseSource(),
-        "wikicommons": lambda: WikimediaCommonsSource(),
         "jamendo": lambda: JamendoSource(config.jamendo_client_id)
         if config.jamendo_client_id else None,
-        "bandcamp": lambda: BandcampSource(),
-        "soundcloud": lambda: SoundCloudSource(),
-        "youtube": lambda: YouTubeSource(),
-        "bilibili": lambda: BilibiliSource(),
+        "bandcamp": lambda: BandcampSource(cookies_file=config.yt_cookies),
+        "soundcloud": lambda: SoundCloudSource(cookies_file=config.yt_cookies),
+        "youtube": lambda: YouTubeSource(cookies_file=config.yt_cookies),
         "dailymotion": lambda: DailymotionSource(),
+        "lightaudio": lambda: LightAudioSource(),
+        "mp3party": lambda: MP3PartySource(),
+        "zaycev": lambda: ZaycevSource(),
         "itunes_preview": lambda: ITunesPreviewSource(),
     }
+    # Removed entirely (always fail, code deleted):
+    #   audius    — JSON parse errors, hosts down
+    #   openverse — 0 results, dead project
+    #   wikicommons — HTTP 403 since 2024
+    #   bilibili  — HTTP 412 Precondition Failed
+    # These sources are gone — pass --sources only re-enables the ones
+    # still present in `builders` above.
 
     sources: List[Source] = []
     for name in enabled:

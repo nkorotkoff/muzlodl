@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -50,9 +51,13 @@ def cmd_download(args):
         skip_existing=not args.no_skip,
         min_match_score=args.min_score,
         quality=args.quality,
+        max_path_len=args.max_path_len,
         enrich=not args.no_enrich,
         upload_after_download=args.upload_after_download,
         delete_after_upload=args.delete_after_upload,
+        acoustid_verify=args.verify_acoustid,
+        acoustid_api_key=args.acoustid_api_key or os.environ.get("ACOUSTID_API_KEY", ""),
+        acoustid_min_score=args.acoustid_min_score,
     )
 
     # Resolve sources: explicit > cached auto-detect > fresh auto-detect
@@ -295,6 +300,56 @@ def cmd_upload(args):
     return 0
 
 
+def cmd_verify(args):
+    """Verify library files against AcoustID/MusicBrainz.
+
+    Fingerprints every audio file and looks it up in AcoustID to find
+    tracks where the metadata matches but the actual sound is wrong
+    (fan-uploads, covers, previews, etc.).
+    """
+    from .verifier import main as _verify_main
+    import sys
+    argv = ["verify"]
+    if args.library and args.library != "./library":
+        argv.append(str(args.library))
+    if args.api_key:
+        argv += ["--api-key", args.api_key]
+    if args.min_score != 0.5:
+        argv += ["--min-score", str(args.min_score)]
+    if args.delete:
+        argv.append("--delete")
+    if args.delete_previews:
+        argv.append("--delete-previews")
+    if args.workers != 4:
+        argv += ["--workers", str(args.workers)]
+    if args.limit:
+        argv += ["--limit", str(args.limit)]
+    old_argv = sys.argv
+    try:
+        sys.argv = argv
+        return _verify_main()
+    finally:
+        sys.argv = old_argv
+
+
+def cmd_web(args):
+    """Start the web UI."""
+    _setup_logging(args.verbose, args.quiet)
+    host = args.host or "127.0.0.1"
+    port = args.port or 8080
+    if args.debug and host != "127.0.0.1":
+        # Werkzeug debugger is an RCE vector; never expose it beyond loopback.
+        log.warning("debug mode with host=%s is dangerous — forcing 127.0.0.1", host)
+        host = "127.0.0.1"
+    log.info("starting web UI at http://%s:%d", host, port)
+    from .web import create_app
+    app = create_app()
+    if host not in ("0.0.0.0", "::", "::0"):
+        import webbrowser
+        webbrowser.open(f"http://{host}:{port}")
+    app.run(host=host, port=port, debug=args.debug)
+
+
 def cmd_yandex_oauth(args):
     """Run the Yandex OAuth flow to get a Disk REST API token.
 
@@ -514,6 +569,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_dl.add_argument("--min-score", type=float, default=0.6,
                       help="min match score 0..1 (default: 0.6)")
     p_dl.add_argument("--quality", default="320", help="MP3 kbps (default: 320)")
+    p_dl.add_argument("--max-path-len", type=int, default=0,
+                      help="max relative path length (0=unlimited, e.g. 100 for Android)")
     p_dl.add_argument("--enrichers", nargs="+",
                       help="enricher chain, e.g. itunes musicbrainz")
     p_dl.add_argument("--no-enrich", action="store_true",
@@ -526,6 +583,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="clear cached source health, then re-detect")
     p_dl.add_argument("--include-previews", action="store_true",
                       help="include iTunes 30-90s preview as last-resort fallback")
+    p_dl.add_argument("--verify-acoustid", action="store_true",
+                      help="fingerprint each download and reject if not the expected track")
+    p_dl.add_argument("--acoustid-api-key", default="",
+                      help="AcoustID API key (or set ACOUSTID_API_KEY env)")
+    p_dl.add_argument("--acoustid-min-score", type=float, default=0.5,
+                      help="AcoustID match threshold (default 0.5)")
     p_dl.add_argument("--upload-after-download", action="store_true",
                       help="stream each track to the cloud as soon as it's ready")
     p_dl.add_argument("--delete-after-upload", action="store_true",
@@ -538,6 +601,21 @@ def build_parser() -> argparse.ArgumentParser:
                           help="upload library to configured cloud storage")
     p_up.add_argument("library", help="library directory")
     p_up.set_defaults(func=cmd_upload)
+
+    p_ver = sub.add_parser("verify",
+                           help="verify library against AcoustID (find wrong audio)")
+    p_ver.add_argument("library", nargs="?", default="./library", help="library directory")
+    p_ver.add_argument("--api-key", default=None,
+                       help="AcoustID API key (or set ACOUSTID_API_KEY env)")
+    p_ver.add_argument("--min-score", type=float, default=0.5,
+                       help="match threshold (default 0.5)")
+    p_ver.add_argument("--delete", action="store_true",
+                       help="delete mismatched files (default: report only)")
+    p_ver.add_argument("--delete-previews", action="store_true",
+                       help="also delete <=35s files (likely 30s previews)")
+    p_ver.add_argument("--workers", type=int, default=4)
+    p_ver.add_argument("--limit", type=int, default=0, help="only verify first N files")
+    p_ver.set_defaults(func=cmd_verify)
 
     p_src = sub.add_parser("sources", help="list available sources (no network test)")
     p_src.set_defaults(func=cmd_sources)
@@ -579,6 +657,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_cst2 = sub.add_parser("cloud-test", help="test upload a single file")
     p_cst2.add_argument("file", help="local file to upload")
     p_cst2.set_defaults(func=cmd_cloud_test)
+
+    p_web = sub.add_parser("web", help="start browser-based UI")
+    p_web.add_argument("--host", default="127.0.0.1", help="bind address")
+    p_web.add_argument("--port", "-p", type=int, default=8080, help="port")
+    p_web.add_argument("--debug", action="store_true", help="Flask debug mode")
+    p_web.add_argument("-q", "--quiet", action="store_true")
+    p_web.add_argument("-v", "--verbose", action="store_true")
+    p_web.set_defaults(func=cmd_web)
 
     return p
 

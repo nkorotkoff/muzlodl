@@ -27,6 +27,14 @@ def load_json(path: Path) -> List[dict]:
     return data
 
 
+_SEP_RE = re.compile(r"\s*[-—–]\s*")
+
+
+def _split_sep(text: str) -> list[str]:
+    """Split on any of the supported separators, keeping parts intact."""
+    return [p.strip() for p in _SEP_RE.split(text) if p.strip()]
+
+
 def load_text(path: Path) -> List[dict]:
     tracks: List[dict] = []
     with open(path, encoding="utf-8") as f:
@@ -34,19 +42,29 @@ def load_text(path: Path) -> List[dict]:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            m = re.match(r"^(.+?)\s*[-—–]\s*(.+)$", line)
-            if not m:
-                tracks.append({"title": line})
+            parts = _split_sep(line)
+            if len(parts) == 1:
+                tracks.append({"title": parts[0]})
                 continue
-            artist, title = m.group(1).strip(), m.group(2).strip()
-            # Handle "Artist - Artist - Title" (artist prefix in title)
-            a_lower = artist.lower()
-            t_lower = title.lower()
-            for sep in (" - ", " — ", " – "):
-                if t_lower.startswith(a_lower + sep):
-                    title = title[len(artist) + len(sep):].strip()
-                    break
-            tracks.append({"artist": artist, "title": title})
+            # 2 parts: Artist - Title.
+            # 3+ parts: either "Artist - Artist - Title" (artist repeated
+            # as a title prefix) or "Artist - Title - Album".
+            artist = parts[0]
+            if len(parts) == 2:
+                tracks.append({"artist": artist, "title": parts[1]})
+            elif parts[1].lower() == artist.lower():
+                # Artist duplicated in the title slot: "Pink Floyd - Pink
+                # Floyd - Time" -> title is everything after the repeat.
+                tracks.append({"artist": artist, "title": " - ".join(parts[2:])})
+            else:
+                # Artist - Title - [Album...]: album is the LAST segment,
+                # everything between artist and album is the title.
+                title = " - ".join(parts[1:-1])
+                tracks.append({
+                    "artist": artist,
+                    "title": title,
+                    "album": parts[-1],
+                })
     return tracks
 
 

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>music-loader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="/" class="logo">♫ music-loader</a>
+  <a href="/import">Import</a>
+  <a href="/">Library</a>
+  <a href="/search">Search</a>
+  <a href="/stats">Stats</a>
+  <a href="/history">History</a>
+  <a href="/settings">Settings</a>
+  <div class="nav-jobs" id="nav-jobs" style="margin-left:auto">
+    <button class="btn-action" onclick="toggleJobsPanel()" id="jobs-toggle" style="display:none">⏳ <span id="jobs-count">0</span></button>
+    <div class="jobs-panel" id="jobs-panel" style="display:none"></div>
+  </div>
+</nav>
+
+<main id="app">
+  <header class="page-header">
+    <h1>Library</h1>
+    <span class="stats" id="stats"></span>
+  </header>
+
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search tracks, artists, albums…" autofocus>
+    <select id="sort-by" title="Sort by">
+      <option value="artist">Artist</option>
+      <option value="title">Title</option>
+      <option value="album">Album</option>
+      <option value="duration">Duration</option>
+      <option value="size">Size</option>
+      <option value="created">Recently added</option>
+    </select>
+    <button onclick="toggleSortOrder()" id="sort-order" class="btn-action" title="Toggle direction">↑ Asc</button>
+    <button onclick="showUploadModal()" class="btn-action" title="Upload your own file">⬆ Upload</button>
+    <button onclick="exportLibrary('csv')" class="btn-action" title="Export CSV">⬇ CSV</button>
+    <button onclick="exportLibrary('json')" class="btn-action" title="Export JSON">⬇ JSON</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <!-- Batch action bar -->
+  <div id="batch-bar" style="display:none" class="batch-bar">
+    <span id="batch-count"></span>
+    <button onclick="batchDelete()" class="btn-danger">🗑 Delete selected</button>
+    <button onclick="clearSelection()">✕ Clear</button>
+  </div>
+
+  <div class="table-wrap">
+    <table id="track-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th><input type="checkbox" id="select-all" title="Select all"></th>
+          <th class="sortable" data-sort="artist">Artist</th>
+          <th class="sortable" data-sort="title">Title</th>
+          <th class="sortable" data-sort="album">Album</th>
+          <th>Duration</th>
+          <th>Size</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div id="scroll-sentinel" class="scroll-sentinel"></div>
+</main>
+
+<!-- Edit modal -->
+<div id="edit-modal" class="modal" style="display:none">
+  <div class="modal-content">
+    <h3>Edit track</h3>
+    <label>Artist <input type="text" id="edit-artist"></label>
+    <label>Title <input type="text" id="edit-title"></label>
+    <label>Album <input type="text" id="edit-album"></label>
+    <div class="btn-row">
+      <button onclick="saveEdit()" class="btn-primary" style="margin-top:0">💾 Save</button>
+      <button onclick="closeModal('edit-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Upload modal -->
+<div id="upload-modal" class="modal" style="display:none">
+  <div class="modal-content">
+    <h3>Upload track</h3>
+    <input type="file" id="upload-file" accept="audio/*,.opus,.mp3,.m4a,.ogg,.webm,.flac">
+    <label>Artist <input type="text" id="upload-artist" placeholder="auto from filename"></label>
+    <label>Title <input type="text" id="upload-title" placeholder="auto from filename"></label>
+    <label>Album <input type="text" id="upload-album" placeholder="Singles"></label>
+    <div class="btn-row">
+      <button onclick="doUpload()" class="btn-primary" style="margin-top:0">⬆ Upload</button>
+      <button onclick="closeModal('upload-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Player bar -->
+<div id="player" style="display:none">
+  <div class="player-inner">
+    <button class="player-btn" onclick="prevTrack()" title="Previous">⏮</button>
+    <button id="play-btn" class="player-btn" onclick="togglePlay()">▶</button>
+    <button class="player-btn" onclick="nextTrack()" title="Next">⏭</button>
+    <button id="shuffle-btn" class="player-btn" onclick="toggleShuffle()" title="Shuffle all">🔀</button>
+    <div class="player-info">
+      <span id="player-artist" class="player-artist"></span>
+      <span id="player-title" class="player-title"></span>
+      <span id="player-queue-info" class="player-queue-info"></span>
+    </div>
+    <div class="player-progress-wrap">
+      <span id="player-current" class="player-time">0:00</span>
+      <div class="player-progress" onclick="seek(event)">
+        <div class="player-progress-track">
+          <div class="player-progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+      <span id="player-duration" class="player-time">0:00</span>
+    </div>
+    <div class="player-volume">
+      <span class="volume-icon">🔊</span>
+      <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8">
+    </div>
+    <button class="player-btn" onclick="closePlayer()" title="Close">✕</button>
+  </div>
+  <audio id="audio" preload="none"></audio>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/csrf.js"></script>
+<script src="/static/js/index.js"></script>
+</body>
+</html>

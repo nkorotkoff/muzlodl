@@ -31,7 +31,7 @@ class TestOutputPaths(unittest.TestCase):
             out_dir, out_path = _output_paths(root, "Artist/Name", "Album:Name", "Title/Name")
             self.assertEqual(out_dir, root / "Artist_Name" / "Album_Name")
             # Filename includes "Artist - Title" format
-            self.assertEqual(out_path, out_dir / "Artist_Name - Title_Name.mp3")
+            self.assertEqual(out_path, out_dir / "Artist_Name - Title_Name.opus")
 
 
 class _FailingSource(Source):
@@ -40,6 +40,15 @@ class _FailingSource(Source):
         return None
     def download(self, info, output_path):
         return False
+
+
+def _stub_duration(pipe, seconds=120.0):
+    """Stub the duration probe so the pipeline sees a plausible track.
+
+    The duration guard (floor 60s / ceiling 10min / ratio check) is
+    unit-tested elsewhere; these tests exercise fallback and caching.
+    """
+    pipe._get_duration = staticmethod(lambda path: seconds)
 
 
 class _SuccessSource(Source):
@@ -62,11 +71,12 @@ class TestPipelineFallback(unittest.TestCase):
             ok = _SuccessSource()
             fail = _FailingSource()
             pipe = Pipeline(cfg, [fail, ok])
+            _stub_duration(pipe)
             pipe.process([{"artist": "A", "title": "T", "album": "X"}])
             self.assertEqual(pipe.stats["success"], 1)
             self.assertEqual(pipe.stats["failed"], 0)
             self.assertEqual(ok.calls, 1)
-            self.assertTrue((Path(d) / "A" / "X" / "A - T.mp3").exists())
+            self.assertTrue((Path(d) / "A" / "X" / "A - T.opus").exists())
 
     def test_skips_existing(self):
         with tempfile.TemporaryDirectory() as d:
@@ -86,6 +96,7 @@ class TestPipelineFallback(unittest.TestCase):
 
             src = CountingSource()
             pipe = Pipeline(cfg, [src])
+            _stub_duration(pipe)
             track = {"artist": "A", "title": "T", "album": "X"}
             pipe.process([track])
             pipe.process([track])
@@ -122,6 +133,7 @@ class TestPipelineFallback(unittest.TestCase):
                     return {"artist": artist, "title": title, "album": "Found Album", "year": "2020"}
 
             pipe = Pipeline(cfg, [CapturingSource()], enrichers=[FakeEnricher()])
+            _stub_duration(pipe)
             pipe.process([{"artist": "A", "title": "T"}])
             self.assertEqual(captured["album"], "Found Album")
 

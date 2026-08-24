@@ -95,12 +95,17 @@ class CloudStorage(ABC):
         ...
 
     # ---- bulk upload (post-run) ----
-    def upload_library(self, library_dir: Path) -> int:
+    def upload_library(self, library_dir: Path, max_workers: int = 4,
+                       progress_cb=None) -> int:
+        """Upload all albums. If progress_cb(done, total) is provided,
+        call it after each album finishes.
+        """
         library_dir = Path(library_dir)
         if not library_dir.exists():
             log.error(f"library dir not found: {library_dir}")
             return 0
-        count = 0
+        # Collect all albums first
+        albums = []
         for artist_dir in sorted(library_dir.iterdir()):
             if not artist_dir.is_dir() or artist_dir.name.startswith("."):
                 continue
@@ -108,9 +113,35 @@ class CloudStorage(ABC):
             for album_dir in sorted(artist_dir.iterdir()):
                 if not album_dir.is_dir():
                     continue
-                album = album_dir.name
-                if self._upload_album(album_dir, artist, album):
+                albums.append((album_dir, artist, album_dir.name))
+        if not albums:
+            return 0
+        total = len(albums)
+        # Upload in parallel (one thread per album)
+        if max_workers > 1:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from threading import Lock
+            lock = Lock()
+            count = 0
+            done = 0
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = {ex.submit(self._upload_album, d, a, n): (a, n) for d, a, n in albums}
+                for fut in as_completed(futs):
+                    if fut.result():
+                        with lock:
+                            count += 1
+                            done += 1
+                            if progress_cb:
+                                progress_cb(done, total)
+        else:
+            count = 0
+            done = 0
+            for album_dir, artist, album_name in albums:
+                if self._upload_album(album_dir, artist, album_name):
                     count += 1
+                done += 1
+                if progress_cb:
+                    progress_cb(done, total)
         log.info(f"uploaded {count} albums")
         return count
 

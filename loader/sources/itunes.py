@@ -12,36 +12,49 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Iterator, Optional
 
+from ..match import strip_markers
 from .base import Source, TrackInfo
+
+
+def _norm_title(s: str) -> str:
+    """Lowercase, strip parens/punctuation and version markers."""
+    t = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", s or "")
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = " ".join(t.lower().split())
+    return strip_markers(t)
 
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://itunes.apple.com/search"
 
 # iTunes Search API allows ~20 calls/minute. We use:
-# - a 1.5s global throttle
+# - a 3s global throttle (1.5s was ~40/min — over the limit, which is
+#   why parallel pipelines kept hitting 429s and stalling for minutes)
 # - a disk-backed cache so repeated tracks skip the network entirely
 # - 429 backoff: if we get rate-limited, sleep 30s and back off further
-_ITUNES_MIN_INTERVAL = 1.5
+_ITUNES_MIN_INTERVAL = 3.0
 _itunes_lock = threading.Lock()
 _itunes_last_call = 0.0
 _itunes_429_count = 0
 _itunes_429_until = 0.0  # epoch: skip until this time
 
 _CACHE_PATH = Path.home() / ".cache" / "music-loader" / "itunes_cache.json"
+_cache_lock = threading.Lock()
 
 
 def _cache_load() -> dict:
     if not _CACHE_PATH.exists():
         return {}
     try:
-        with open(_CACHE_PATH, encoding="utf-8") as f:
-            return json.load(f)
+        with _cache_lock:
+            with open(_CACHE_PATH, encoding="utf-8") as f:
+                return json.load(f)
     except Exception:
         return {}
 
@@ -49,8 +62,15 @@ def _cache_load() -> dict:
 def _cache_save(data: dict) -> None:
     try:
         _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(_CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        with _cache_lock:
+            # Atomic replace: concurrent writers (parallel jobs, multiple
+            # pipelines) must not interleave partial JSON or clobber each
+            # other's entries — a lost positive entry means the next run
+            # hits iTunes again (and 429s).
+            tmp = _CACHE_PATH.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp.replace(_CACHE_PATH)
     except Exception as e:
         log.debug(f"itunes cache save failed: {e}")
 
@@ -185,6 +205,16 @@ class ITunesEnricher:
         if not results:
             return None
         best = results[0]
+        # NEVER rewrite the track to a different song: when the exact
+        # title is missing (e.g. requested "Another Day in Paradise -
+        # 2016 Remaster" but the API only returns other Phil Collins
+        # tracks) the best result may score just 0.3 (artist only).
+        # Using it would make the pipeline download the WRONG track.
+        # Compare the marker-stripped title; mismatch → no enrichment.
+        want = _norm_title(title)
+        got = _norm_title(best.get("trackName") or "")
+        if want and got and want != got and want not in got and got not in want:
+            return None
         return {
             "artist": best.get("artistName") or artist,
             "title": best.get("trackName") or title,
@@ -224,6 +254,8 @@ class ITunesPreviewSource(Source):
                 cover_url=_bigger_cover(item.get("artworkUrl100", "")),
                 is_preview=True,
                 match_score=_score(item, artist, title),
+                extra={"raw_title": item.get("trackName") or title,
+                       "raw_artist": item.get("artistName") or artist},
             )
 
     def download(self, info: TrackInfo, output_path: Path) -> bool:

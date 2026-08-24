@@ -1,4 +1,4 @@
-"""Tests for newly added sources (Deezer dropped, Audius + MusicBrainz + yt-dlp extras)."""
+"""Tests for sources (Jamendo + MusicBrainz + yt-dlp extras)."""
 import sys
 import tempfile
 import unittest
@@ -7,64 +7,55 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from loader.sources.audius import AudiusSource
 from loader.sources.base import score_match
 from loader.sources.jamendo import JamendoSource
+from loader.sources.mp3party import MP3PartySource
 from loader.sources.musicbrainz import MusicBrainzEnricher
-from loader.sources.ytdlp_extras import BilibiliSource, DailymotionSource
+from loader.sources.ytdlp_extras import DailymotionSource
 
 
-class TestAudiusSource(unittest.TestCase):
-    def setUp(self):
-        AudiusSource._cached_host = "https://audius.co"
+class TestMP3PartyParser(unittest.TestCase):
+    """The data-js-* attributes appear on one <div> in any order;
+    artist-name comes BEFORE data-js-id. The parser must capture the
+    whole tag or the artist is lost and every result scores 0.5 (below
+    the pipeline's 0.75 threshold)."""
 
-    def test_search_returns_streamable(self):
-        src = AudiusSource()
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
-            "data": [{
-                "id": "abc",
-                "title": "Test Track",
-                "duration": 180,
-                "streamable": True,
-                "user": {"name": "Test Artist"},
-                "artwork": {"1000x1000": "https://art/1000.jpg"},
-            }]
-        }
-        with patch("requests.get", return_value=mock_resp) as g:
-            info = src.search("Test Artist", "Test Track")
-            g.assert_called_once()
-        self.assertIsNotNone(info)
-        self.assertEqual(info.source, "audius")
-        self.assertEqual(info.artist, "Test Artist")
-        self.assertEqual(info.title, "Test Track")
-        self.assertIn("audius.co", info.url)
-        self.assertEqual(info.cover_url, "https://art/1000.jpg")
+    _HTML = (
+        '<div class="track__user-panel" data-is-playlist="false" '
+        'data-js-artist-name="Coldplay" data-js-id="50240" '
+        'data-js-image="/system/x.jpg" '
+        'data-js-song-title="Viva la Vida" '
+        'data-js-url="https://dl2.mp3party.net/online/50240.mp3">'
+        '<div class="track__imageWrapp"></div></div>'
+    )
 
-    def test_search_skips_unstreamable(self):
-        src = AudiusSource()
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {"data": [{
-            "id": "abc", "title": "X", "duration": 100,
-            "streamable": False, "user": {"name": "A"},
-        }]}
-        with patch("requests.get", return_value=mock_resp):
-            self.assertIsNone(src.search("A", "X"))
+    def test_parses_artist_before_id(self):
+        src = MP3PartySource()
+        results = src._parse_results(self._HTML)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "50240")
+        self.assertEqual(results[0]["artist"], "Coldplay")
+        self.assertEqual(results[0]["title"], "Viva la Vida")
+        self.assertEqual(results[0]["url"], "https://dl2.mp3party.net/online/50240.mp3")
 
-    def test_download_writes_bytes(self):
-        src = AudiusSource()
-        with tempfile.TemporaryDirectory() as d:
-            out = Path(d) / "track.mp3"
-            with patch("requests.get") as g:
-                g.return_value.__enter__.return_value = MagicMock(
-                    status_code=200,
-                    iter_content=lambda n: [b"ID3", b"\x00" * 1000],
-                )
-                self.assertTrue(src.download(
-                    type("I", (), {"url": "https://x/stream"})(), out,
-                ))
-            self.assertTrue(out.exists())
-            self.assertGreater(out.stat().st_size, 0)
+    def test_search_score_full_match(self):
+        src = MP3PartySource()
+        with patch.object(src, "_fetch_search", return_value=self._HTML):
+            results = list(src.search_iter("Coldplay", "Viva La Vida"))
+        self.assertEqual(len(results), 1)
+        # Artist must survive parsing so the score is a real match,
+        # not the 0.5 cap applied when the artist is unknown.
+        self.assertEqual(results[0].artist, "Coldplay")
+        self.assertEqual(results[0].match_score, 1.0)
+
+    def test_parses_entities_in_title(self):
+        html = self._HTML.replace(
+            'data-js-song-title="Viva la Vida"',
+            'data-js-song-title="Livin&#39; On A Prayer"',
+        )
+        src = MP3PartySource()
+        results = src._parse_results(html)
+        self.assertEqual(results[0]["title"], "Livin' On A Prayer")
 
 
 class TestMusicBrainzEnricher(unittest.TestCase):
@@ -163,10 +154,6 @@ class TestJamendoSource(unittest.TestCase):
 
 
 class TestYTDLPExtras(unittest.TestCase):
-    def test_bilibili_prefix(self):
-        self.assertEqual(BilibiliSource.search_prefix, "bilisearch5:")
-        self.assertEqual(BilibiliSource.name, "bilibili")
-
     def test_dailymotion_prefix(self):
         self.assertEqual(DailymotionSource.search_prefix, "dailymotionsearch5:")
         self.assertEqual(DailymotionSource.name, "dailymotion")
