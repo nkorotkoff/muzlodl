@@ -155,6 +155,21 @@ def api_download():
     }
     if options.get("sources"):
         overrides["enabled_sources"] = options["sources"]
+    else:
+        # Resolve from settings: auto (default) uses canonical chain
+        _settings = db.get_all_settings()
+        _auto = _settings.get("sources_auto", "true") == "true"
+        if _auto:
+            from ..config import Config as _Cfg2
+            overrides["enabled_sources"] = list(_Cfg2.from_env().enabled_sources)
+        elif _settings.get("sources"):
+            import json as _json
+            try:
+                _lst = _json.loads(_settings["sources"])
+                if _lst:
+                    overrides["enabled_sources"] = _lst
+            except Exception:
+                pass
 
     tmp_file = locals().get("tmp", None)
     job = {
@@ -232,8 +247,10 @@ def api_cancel_download(job_id: str):
 
 @bp.route("/api/library/retry-failed", methods=["POST"])
 def api_retry_failed():
-    """Re-submit all failed tracks as a new download."""
+    """Re-submit all failed+missing tracks as a new download."""
     failed, _ = db.search_tracks(status="failed", limit=9999)
+    missing, _ = db.search_tracks(status="missing", limit=9999)
+    failed = failed + missing
     if not failed:
         return jsonify({"job_id": None, "total": 0})
     # Pass the structured rows straight to the pipeline — a text round-trip
@@ -245,8 +262,8 @@ def api_retry_failed():
 
     job_id = str(uuid.uuid4())[:8]
     session_id = db.create_session(
-        source=f"retry: {len(tracks)} failed tracks",
-        source_name="Retry failed",
+        source=f"retry: {len(tracks)} failed/missing tracks",
+        source_name="Retry failed/missing",
         total=len(tracks),
     )
     for t in tracks:
@@ -260,7 +277,7 @@ def api_retry_failed():
     # Persist like regular downloads so a restart resumes this job.
     db.create_job(job_id, session_id, "Retry failed", {})
 
-    # Load current settings
+    # Load current settings — auto (default) uses canonical chain
     settings = db.get_all_settings()
     overrides = {
         "parallel": int(settings.get("parallel", 4)),
@@ -268,7 +285,10 @@ def api_retry_failed():
         "enrich": settings.get("enrich", "true") == "true",
         "max_path_len": int(settings.get("max_path_len", 0)),
     }
-    if settings.get("sources"):
+    if settings.get("sources_auto", "true") == "true":
+        from ..config import Config as _Cfg3
+        overrides["enabled_sources"] = list(_Cfg3.from_env().enabled_sources)
+    elif settings.get("sources"):
         try:
             overrides["enabled_sources"] = json.loads(settings["sources"])
         except (json.JSONDecodeError, TypeError):

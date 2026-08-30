@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}music-loader{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+{% include "_nav.html" %}
+{% block content %}{% endblock %}
+<div id="toast"></div>
+<script src="/static/js/i18n.js"></script>
+<script src="/static/js/csrf.js"></script>
+<script src="/static/js/common.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -12,8 +12,9 @@ log = logging.getLogger(__name__)
 
 DEFAULTS = {
     "quality": "128",
+    "sources_auto": "true",
     "sources": json.dumps([
-        "youtube", "soundcloud", "lightaudio", "mp3party", "archiveorg",
+        "youtube", "soundcloud", "lightaudio", "mp3party", "zaycev", "archiveorg",
     ]),
     "max_path_len": "0",
     "enrich": "true",

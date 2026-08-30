@@ -1,0 +1,112 @@
+{% extends "layout.html" %}
+{% block title %}Settings — music-loader{% endblock %}
+{% block content %}
+<main>
+  <header class="page-header"><h1 data-i18n="settings.title">Settings</h1><span id="save-indicator" class="hint" style="min-width:90px;text-align:right"></span></header>
+
+  <div class="settings-layout">
+    <nav class="settings-tabs" role="tablist" aria-label="Settings">
+      <button role="tab" data-tab="general" class="tab-active" aria-selected="true" data-i18n="settings.tab.general">General</button>
+      <button role="tab" data-tab="sources" data-i18n="settings.tab.sources">Sources</button>
+      <button role="tab" data-tab="audio" data-i18n="settings.tab.audio">Audio</button>
+      <button role="tab" data-tab="cloud" data-i18n="settings.tab.cloud">Cloud</button>
+      <button role="tab" data-tab="system" data-i18n="settings.tab.system">System</button>
+    </nav>
+
+    <div class="settings-panels">
+      <section data-tab-panel="general" class="settings-panel">
+        <div class="card">
+          <h3 data-i18n="settings.language">Language</h3>
+          <select id="s-lang" onchange="setLang(this.value)">
+            <option value="en">English</option>
+            <option value="ru">Русский</option>
+          </select>
+        </div>
+      </section>
+
+      <section data-tab-panel="sources" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="settings.sources">Sources</h3>
+          <label><input type="checkbox" id="s-sources-auto"> <span data-i18n="settings.sourcesAuto">Автовыбор источников (рекомендуется)</span></label>
+          <p class="hint" data-i18n="settings.sourcesAutoHint">Автоматически использует все доступные источники. Ручная настройка не требуется.</p>
+          <p id="sources-auto-status" class="hint" style="display:none"></p>
+          <details id="sources-advanced">
+            <summary data-i18n="settings.advanced">Тонкая настройка</summary>
+            <p class="hint" data-i18n="settings.sourcesHint">Порядок — первый рабочий источник выигрывает для каждого трека.</p>
+            <div id="sources-list"></div>
+            <button onclick="runDoctor()" style="margin-top:.75rem" data-i18n="settings.testSources">🔍 Test sources (doctor)</button>
+            <div id="doctor-results" style="display:none;margin-top:.75rem"></div>
+          </details>
+        </div>
+      </section>
+
+      <section data-tab-panel="audio" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="settings.acoustid">AcoustID verification</h3>
+          <p class="hint" data-i18n="settings.acoustidHint">Fingerprint each download and reject mismatches. Get a free key at <code>acoustid.org</code>.</p>
+          <label><span data-i18n="settings.apiKey">API key</span> <input type="text" id="s-acoustid-key" placeholder="AcoustID API key"></label>
+          <label><input type="checkbox" id="s-acoustid-verify"> <span data-i18n="settings.verify">Verify downloads with AcoustID</span></label>
+          <label><span data-i18n="settings.minScore">Min match score</span> <input type="number" id="s-acoustid-score" min="0" max="1" step="0.1" value="0.5"></label>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <h3 data-i18n="settings.reencode">Re-encode (compress)</h3>
+          <label><span data-i18n="settings.targetBitrate">Target bitrate (kbps)</span>
+            <select id="reencode-bitrate">
+              <option value="64">64 (≈50% smaller)</option>
+              <option value="96">96 (≈25% smaller)</option>
+              <option value="128" selected>128 (current)</option>
+            </select>
+          </label>
+          <button onclick="startReencode()" data-i18n="settings.reencodeLibrary">🗜 Re-encode library</button>
+          <div id="reencode-progress" style="display:none;margin-top:.5rem">
+            <div class="progress-bar"><div class="progress-fill" id="reencode-fill"></div></div>
+            <p id="reencode-text" style="color:#8b949e;font-size:.85rem"></p>
+          </div>
+        </div>
+      </section>
+
+      <section data-tab-panel="cloud" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="settings.cloud">Cloud storage</h3>
+          <div id="cloud-status" data-i18n="settings.cloudChecking">Checking...</div>
+          <div id="cloud-setup" style="display:none;margin-top:.75rem">
+            <select id="cloud-backend">
+              <option value="yandex">Yandex.Disk (WebDAV)</option>
+              <option value="yandex_rest">Yandex.Disk (REST API token)</option>
+              <option value="mailru">Cloud.Mail.ru</option>
+            </select>
+            <label id="cloud-login-wrap"><span data-i18n="settings.login">Login (email)</span> <input type="text" id="cloud-login" placeholder="user@yandex.ru"></label>
+            <label id="cloud-password-label"><span data-i18n="settings.appPassword">App password</span> <input type="password" id="cloud-password" placeholder="app password"></label>
+            <p class="hint" id="cloud-rest-hint" style="display:none" data-i18n="settings.oauthHint">Paste your Yandex OAuth token (from <code>music-loader yandex-oauth</code>).</p>
+            <label><span data-i18n="settings.rootFolder">Root folder</span> <input type="text" id="cloud-root" value="music"></label>
+            <div class="btn-row">
+              <button onclick="saveCloudConfig()" data-i18n="settings.saveTest">💾 Save & test</button>
+              <button onclick="clearCloudConfig()" class="btn-del" style="color:#ff7b72" data-i18n="settings.remove">🗑 Remove</button>
+            </div>
+          </div>
+          <button onclick="document.getElementById('cloud-setup').style.display='block'" id="cloud-show-setup" style="display:none;margin-top:.5rem" data-i18n="settings.cloudConfigure">Configure cloud</button>
+          <div id="cloud-upload-status" style="margin-top:.5rem"></div>
+          <button onclick="uploadCloud()" class="btn-primary" style="margin-top:.75rem" data-i18n="settings.uploadLibrary">☁ Upload library to cloud</button>
+        </div>
+      </section>
+
+      <section data-tab-panel="system" class="settings-panel" hidden>
+        <div class="card">
+          <h3 data-i18n="settings.maintenance">Library maintenance</h3>
+          <div class="btn-row">
+            <button onclick="retryFailed()" data-i18n="settings.retryFailed">🔄 Retry failed</button>
+          </div>
+          <div id="maint-result" style="margin-top:.5rem"></div>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <h3 data-i18n="settings.security">Security</h3>
+          <label><span data-i18n="settings.adminUsername">Admin username</span> <input type="text" id="s-username" placeholder="admin" autocomplete="username"></label>
+          <label style="margin-top:.5rem"><span data-i18n="settings.newPassword">New password</span> <input type="password" id="s-password" data-i18n-placeholder="settings.newPasswordPlaceholder" placeholder="leave empty to keep current" autocomplete="new-password"></label>
+          <p class="hint" data-i18n="settings.passwordHint">Changing the password will apply on the next login.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/js/settings.js"></script>{% endblock %}

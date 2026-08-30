@@ -1,0 +1,17 @@
+<nav class="topnav">
+  <a href="/" class="logo">♫ music-loader</a>
+  <a href="/import" data-i18n="nav.import" class="{% if active=='import' %}active{% endif %}">Import</a>
+  <a href="/" data-i18n="nav.library" class="{% if active=='library' %}active{% endif %}">Library</a>
+  <a href="/search" data-i18n="nav.search" class="{% if active=='search' %}active{% endif %}">Search</a>
+  <a href="/stats" data-i18n="nav.stats" class="{% if active=='stats' %}active{% endif %}">Stats</a>
+  <a href="/history" data-i18n="nav.history" class="{% if active=='history' %}active{% endif %}">History</a>
+  <a href="/settings" data-i18n="nav.settings" class="{% if active=='settings' %}active{% endif %}">Settings</a>
+  <div class="lang-switch">
+    <button data-lang="en" onclick="setLang('en')">EN</button>
+    <button data-lang="ru" onclick="setLang('ru')">RU</button>
+  </div>
+  <div class="nav-jobs" id="nav-jobs" style="margin-left:auto">
+    <button class="btn-action" onclick="toggleJobsPanel()" id="jobs-toggle" style="display:none">⏳ <span id="jobs-count">0</span></button>
+    <div class="jobs-panel" id="jobs-panel" style="display:none"></div>
+  </div>
+</nav>

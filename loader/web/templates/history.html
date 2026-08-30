@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% block title %}History — music-loader{% endblock %}
+{% block content %}
+<main>
+  <header class="page-header"><h1 data-i18n="history.title">Import history</h1></header>
+
+  <table id="history-table">
+    <thead>
+      <tr>
+        <th data-i18n="history.date">Date</th>
+        <th data-i18n="history.source">Source</th>
+        <th data-i18n="history.total">Total</th>
+        <th data-i18n="history.downloaded">Downloaded</th>
+        <th data-i18n="history.failed">Failed</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="detail-modal" class="modal" style="display:none">
+    <div class="modal-content" style="width:640px;max-height:80vh;overflow-y:auto">
+      <h3 id="detail-title"></h3>
+      <table>
+        <thead><tr><th data-i18n="library.table.artist">Artist</th><th data-i18n="library.table.title">Title</th><th>Status</th></tr></thead>
+        <tbody id="detail-body"></tbody>
+      </table>
+      <div class="btn-row">
+        <button onclick="closeDetail()" data-i18n="history.close">Close</button>
+      </div>
+    </div>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/js/history.js"></script>{% endblock %}

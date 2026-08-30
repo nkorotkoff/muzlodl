@@ -44,6 +44,22 @@ def api_set_settings():
     return jsonify({"ok": True})
 
 
+def _resolve_sources_for_chain(settings: dict) -> list:
+    """Return the effective source chain: auto (default) or manual list."""
+    from ..config import Config as _Cfg
+    cfg = _Cfg.from_env()
+    if settings.get("sources_auto", "true") == "true":
+        return list(cfg.enabled_sources)
+    if settings.get("sources"):
+        try:
+            lst = json.loads(settings["sources"])
+            if lst:
+                return lst
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return list(cfg.enabled_sources)
+
+
 @bp.route("/api/doctor")
 def api_doctor():
     """Run source health check (doctor). Only tests sources in the
@@ -54,14 +70,7 @@ def api_doctor():
 
     cfg = Config.from_env()
     settings = db.get_all_settings()
-    enabled = []
-    if settings.get("sources"):
-        try:
-            enabled = json.loads(settings["sources"])
-        except (json.JSONDecodeError, TypeError):
-            enabled = []
-    if not enabled:
-        enabled = list(cfg.enabled_sources)
+    enabled = _resolve_sources_for_chain(settings)
     # Always include itunes — it's the metadata enricher, not an audio source
     test_names = list(dict.fromkeys([*enabled, "itunes"]))
 

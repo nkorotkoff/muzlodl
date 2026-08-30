@@ -33,11 +33,11 @@ document.getElementById('search-input').addEventListener('keydown', (e) => {
 
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
-  if (!q) { toast('Enter a search query', true); return; }
+  if (!q) { toast(t('common.searching'), true); return; }
 
   const resultsDiv = document.getElementById('results');
   resultsDiv.style.display = 'block';
-  document.getElementById('results-list').innerHTML = '<div class="loading"><div class="spinner"></div><span class="hint">Searching... (may take 10-30s)</span></div>';
+  document.getElementById('results-list').innerHTML = '<div class="loading"><div class="spinner"></div><span class="hint">' + t('common.loading') + '</span></div>';
 
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
@@ -51,10 +51,10 @@ async function doSearch() {
 function renderResults(data) {
   const results = data.results || [];
   const el = document.getElementById('results-list');
-  document.getElementById('result-count').textContent = `${results.length} candidates from ${data.sources_searched || '?'} sources`;
+  document.getElementById('result-count').textContent = t('search.results', {n: results.length, s: data.sources_searched || '?'});
 
   if (!results.length) {
-    el.innerHTML = '<p class="empty">No results found</p>';
+    el.innerHTML = '<p class="empty">' + t('search.noResults') + '</p>';
     return;
   }
 
@@ -127,8 +127,8 @@ function previewTrack(url) {
 
   previewPlayer.style.display = 'block';
   if (mainEl) mainEl.classList.add('has-player');
-  document.getElementById('player-artist').textContent = 'Loading preview...';
-  document.getElementById('player-title').textContent = 'Downloading...';
+  document.getElementById('player-artist').textContent = t('search.preview.loading');
+  document.getElementById('player-title').textContent = t('search.preview.downloading');
   document.getElementById('player-progress-fill').style.width = '10%';
   document.getElementById('player-current').textContent = '0:00';
   document.getElementById('player-duration').textContent = '0:00';
@@ -151,14 +151,14 @@ function previewTrack(url) {
         .then(function(s) {
           if (s.error) {
             clearInterval(iv);
-            document.getElementById('player-title').textContent = 'Failed: ' + s.error;
+            document.getElementById('player-title').textContent = t('search.preview.failed', {msg: s.error});
             document.getElementById('player-progress-fill').style.width = '0%';
             return;
           }
           if (s.ready) {
             clearInterval(iv);
             document.getElementById('player-artist').textContent = 'Preview';
-            document.getElementById('player-title').textContent = 'Streaming from source';
+            document.getElementById('player-title').textContent = t('search.preview.streaming');
             document.getElementById('player-progress-fill').style.width = '0%';
             previewAudio.src = '/api/preview/' + jobId + '/stream';
             previewAudio.load();
@@ -172,7 +172,7 @@ function previewTrack(url) {
     }, 500);
   })
   .catch(function(e) {
-    document.getElementById('player-title').textContent = 'Failed: ' + e.message;
+    document.getElementById('player-title').textContent = t('search.preview.failed', {msg: e.message});
     document.getElementById('player-progress-fill').style.width = '0%';
   });
 }
@@ -223,7 +223,7 @@ function getSelectedResults() {
 
 async function downloadSelected() {
   const selected = getSelectedResults();
-  if (!selected.length) { toast('Select at least one result', true); return; }
+  if (!selected.length) { toast(t('search.noResults'), true); return; }
 
   // Send structured tracks — no text round-trip, so titles/albums
   // containing " - " survive intact.
@@ -236,7 +236,7 @@ async function downloadSelected() {
   const prog = document.getElementById('progress');
   prog.style.display = 'block';
   document.getElementById('progress-fill').style.width = '0%';
-  document.getElementById('progress-text').textContent = `Starting download of ${tracks.length} tracks...`;
+  document.getElementById('progress-text').textContent = t('common.loading');
 
   try {
     const resp = await api('/api/download', {
@@ -254,7 +254,7 @@ async function downloadSelected() {
     });
     pollJob(resp.job_id, resp.total);
   } catch (e) {
-    toast('Error: ' + e.message, true);
+    toast(t('common.error', {msg: e.message}), true);
     prog.style.display = 'none';
   }
 }
@@ -268,65 +268,14 @@ function pollJob(jobId, total) {
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
       document.getElementById('progress-fill').style.width = Math.min(pct, 100) + '%';
       document.getElementById('progress-text').textContent =
-        `${p.ok} ok, ${p.failed} failed, ${total - done} remaining`;
+        t('import.progressOkFailed', {ok: p.ok, failed: p.failed, remaining: total - done});
       if (s.done || s.cancelled) {
         clearInterval(interval);
-        document.getElementById('progress-text').textContent = s.cancelled ? 'Cancelled' : '✅ Complete!';
+        document.getElementById('progress-text').textContent = s.cancelled ? t('common.cancelled') : t('common.complete');
       }
     } catch (e) { clearInterval(interval); }
   }, 1000);
 }
 
-// ---- Background jobs widget ----
-function escape(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
-async function pollJobs() {
-  try {
-    const r = await fetch("/api/jobs");
-    if (!r.ok) return;
-    const d = await r.json();
-    renderJobs(d.jobs || [], d.running || 0);
-  } catch (e) {}
-}
-function renderJobs(jobs, running) {
-  const toggle = document.getElementById("jobs-toggle");
-  if (!toggle) return;
-  if (!running && !jobs.length) {
-    toggle.style.display = "none";
-    const p = document.getElementById("jobs-panel");
-    if (p) p.style.display = "none";
-    return;
-  }
-  toggle.style.display = "inline-block";
-  document.getElementById("jobs-count").textContent = running;
-  const panel = document.getElementById("jobs-panel");
-  const isOpen = panel.style.display === "block";
-  panel.innerHTML = jobs.map(j => {
-    const p = j.progress || {ok: 0, failed: 0, total: 0};
-    const pct = p.total > 0 ? Math.round((p.ok + p.failed) / p.total * 100) : 0;
-    const statusIcon = j.done ? (j.error ? "❌" : "✅") : (j.cancelled ? "⏹" : "⏳");
-    const detail = j.done && j.error
-      ? "<span class=\"job-error\">" + escape(j.error) + "</span>"
-      : "<span class=\"job-meta\">" + p.ok + " done" + (p.failed ? ", " + p.failed + " failed" : "") + " / " + p.total + "</span>";
-    const stop = j.done ? "" : "<button class=\"btn-job-stop\" onclick=\"cancelJob('" + j.id + "')\" title=\"Stop job\">⏹</button>";
-    return "<div class=\"job-item\"><div class=\"job-head\"><span>" + statusIcon + " " + escape(j.title) + "</span><span class=\"job-pct\">" + pct + "%</span>" + stop + "</div><div class=\"progress-bar\"><div class=\"progress-fill\" style=\"width:" + pct + "%\"></div></div>" + detail + "</div>";
-  }).join("");
-  if (isOpen) panel.style.display = "block";
-}
-async function cancelJob(id) {
-  if (!confirm('Stop this job?')) return;
-  try {
-    await api(`/api/download/${id}`, { method: 'DELETE' });
-    toast('Job stopped');
-  } catch (e) { toast('Error: ' + e.message, true); }
-}
-function toggleJobsPanel() {
-  const panel = document.getElementById("jobs-panel");
-  panel.style.display = panel.style.display === "block" ? "none" : "block";
-  if (panel.style.display === "block") pollJobs();
-}
-setInterval(() => {
-  const toggle = document.getElementById("jobs-toggle");
-  if (toggle && toggle.style.display !== "none") pollJobs();
-}, 2000);
-pollJobs();
+window.addEventListener('langchange', function() { applyI18n(); });
 

@@ -45,9 +45,9 @@ def api_search():
             break
 
     cfg = Config.from_env()
-    # Load settings from DB
+    # Load settings from DB — auto (default) keeps canonical chain
     settings = db.get_all_settings()
-    if settings.get("sources"):
+    if settings.get("sources_auto", "true") != "true" and settings.get("sources"):
         try:
             cfg.enabled_sources = json.loads(settings["sources"])
         except (json.JSONDecodeError, TypeError):

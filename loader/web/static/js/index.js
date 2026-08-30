@@ -319,36 +319,69 @@ function escape(s) {
   const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML;
 }
 
+function updateSortArrows() {
+  document.querySelectorAll('th.sortable').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    const col = th.dataset.sort;
+    if (col === state.sort) {
+      arrow.textContent = state.order === 'asc' ? ' ↑' : ' ↓';
+      th.classList.add('sorted');
+      th.setAttribute('aria-sort', state.order === 'asc' ? 'ascending' : 'descending');
+    } else {
+      arrow.textContent = '';
+      th.classList.remove('sorted');
+      th.removeAttribute('aria-sort');
+    }
+  });
+}
+
+function handleSortClick(col) {
+  if (state.sort === col) {
+    state.order = state.order === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sort = col;
+    state.order = 'asc';
+  }
+  state.offset = 0;
+  saveFilters();
+  updateSortArrows();
+  loadLibrary();
+}
+
 function renderTracks() {
   const tbody = document.getElementById('tbody');
   if (!state.tracks.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">No tracks found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">' + t('library.empty') + '</td></tr>';
     document.getElementById('count').textContent = '0 / 0';
     return;
   }
-  tbody.innerHTML = state.tracks.map(t => {
-    const isPlaying = currentTrackId === t.id;
-    const canPlay = !!t.file_path;
+  updateSortArrows();
+  tbody.innerHTML = state.tracks.map(tr => {
+    const isPlaying = currentTrackId === tr.id;
+    const canPlay = !!tr.file_path;
     const rowClass = isPlaying ? ' class="row-playing"' : '';
-    const playAttr = canPlay ? ' data-id="' + t.id + '" data-artist="' + t.artist.replace(/"/g,'&quot;') + '" data-title="' + t.title.replace(/"/g,'&quot;') + '"' : '';
-    const dur = t.duration ? fmtDur(t.duration) : '—';
+    const playAttr = canPlay ? ' data-id="' + tr.id + '" data-artist="' + tr.artist.replace(/"/g,'&quot;') + '" data-title="' + tr.title.replace(/"/g,'&quot;') + '"' : '';
+    const dur = tr.duration ? fmtDur(tr.duration) : '—';
+    const added = tr.created_at ? new Date(tr.created_at).toLocaleDateString() : '—';
     return '<tr' + rowClass + '>'
       + '<td>' + (canPlay
-        ? '<button class="btn-play' + (isPlaying ? ' playing' : '') + '" data-play="1"' + playAttr + ' title="Play">' + (isPlaying ? '⏸' : '▶') + '</button>'
+        ? '<button class="btn-play' + (isPlaying ? ' playing' : '') + '" data-play="1"' + playAttr + ' title="' + t('player.play') + '">' + (isPlaying ? '⏸' : '▶') + '</button>'
         : '<span class="no-play">—</span>') + '</td>'
-      + '<td><input type="checkbox" class="row-cb" value="' + t.id + '"></td>'
-      + '<td>' + escape(t.artist) + '</td>'
-      + '<td><strong>' + escape(t.title) + '</strong></td>'
-      + '<td>' + escape(t.album) + '</td>'
+      + '<td><input type="checkbox" class="row-cb" value="' + tr.id + '"></td>'
+      + '<td>' + escape(tr.artist) + '</td>'
+      + '<td><strong>' + escape(tr.title) + '</strong></td>'
+      + '<td>' + escape(tr.album) + '</td>'
       + '<td>' + dur + '</td>'
-      + '<td>' + fmtSize(t.file_size) + '</td>'
+      + '<td>' + fmtSize(tr.file_size) + '</td>'
+      + '<td class="muted">' + added + '</td>'
       + '<td>' + (canPlay ? '<div class="dd-wrap">'
         + '<button class="btn-dd" data-dd="1" title="Actions">⋮</button>'
         + '<div class="dd-menu">'
-        +   '<button class="dd-item" data-dd-dl="' + t.id + '">⬇ Download</button>'
-        +   '<button class="dd-item" data-dd-reload="' + t.id + '">🔄 Re-download from another source</button>'
-        +   '<button class="dd-item" data-dd-edit="' + t.id + '">✎ Edit</button>'
-        +   '<button class="dd-item dd-danger" data-dd-del="' + t.id + '">✕ Delete</button>'
+        +   '<button class="dd-item" data-dd-dl="' + tr.id + '">' + t('library.actions.download') + '</button>'
+        +   '<button class="dd-item" data-dd-reload="' + tr.id + '">' + t('library.actions.redownload') + '</button>'
+        +   '<button class="dd-item" data-dd-edit="' + tr.id + '">' + t('library.actions.edit') + '</button>'
+        +   '<button class="dd-item dd-danger" data-dd-del="' + tr.id + '">' + t('library.actions.delete') + '</button>'
         + '</div></div>' : '') + '</td>'
     + '</tr>';
   }).join('');
@@ -366,12 +399,12 @@ function renderTracks() {
   tbody.querySelectorAll('.btn-del').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm('Delete this track?')) return;
+      if (!confirm(t('common.confirmDelete'))) return;
       try {
         await api(`/api/library/${btn.dataset.id}`, { method: 'DELETE' });
         if (currentTrackId == btn.dataset.id) closePlayer();
-        toast('Deleted'); loadLibrary();
-      } catch (e) { toast('Error: ' + e.message, true); }
+        toast(t('common.deleted')); loadLibrary();
+      } catch (e) { toast(t('common.error', {msg: e.message}), true); }
     });
   });
 
@@ -418,9 +451,9 @@ function renderTracks() {
       const id = parseInt(btn.dataset.ddReload);
       try {
         const d = await api(`/api/library/${id}/reload`, { method: 'POST' });
-        toast('Re-download started');
+        toast(t('common.updated'));
         pollJobs();
-      } catch (e) { toast('Error: ' + e.message, true); }
+      } catch (e) { toast(t('common.error', {msg: e.message}), true); }
     });
   });
   tbody.querySelectorAll('[data-dd-edit]').forEach(btn => {
@@ -434,13 +467,13 @@ function renderTracks() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       closeAllMenus();
-      if (!confirm('Delete this track?')) return;
+      if (!confirm(t('common.confirmDelete'))) return;
       const id = parseInt(btn.dataset.ddDel);
       try {
         await api(`/api/library/${id}`, { method: 'DELETE' });
         if (currentTrackId == id) closePlayer();
-        toast('Deleted'); loadLibrary();
-      } catch (e) { toast('Error: ' + e.message, true); }
+        toast(t('common.deleted')); loadLibrary();
+      } catch (e) { toast(t('common.error', {msg: e.message}), true); }
     });
   });
 
@@ -477,7 +510,7 @@ function updateBatchBar() {
   const ids = getSelectedIds();
   if (ids.length) {
     bar.style.display = 'flex';
-    document.getElementById('batch-count').textContent = `${ids.length} selected`;
+    document.getElementById('batch-count').textContent = t('library.batch.selected', {n: ids.length});
   } else {
     bar.style.display = 'none';
   }
@@ -493,26 +526,26 @@ function clearSelection() {
 async function batchDelete() {
   const ids = getSelectedIds();
   if (!ids.length) return;
-  if (!confirm(`Delete ${ids.length} tracks?`)) return;
+  if (!confirm(t('common.confirmDeleteCount', {n: ids.length}))) return;
   try {
     const r = await api('/api/library/batch-delete', {
       method: 'POST', body: JSON.stringify({ ids }),
     });
-    toast(`Deleted ${r.removed} tracks`);
+    toast(t('common.deleted') + ' ' + r.removed);
     clearSelection();
     loadLibrary();
-  } catch (e) { toast('Error: ' + e.message, true); }
+  } catch (e) { toast(t('common.error', {msg: e.message}), true); }
 }
 
 // ---- Edit modal ----
 let editingId = null;
 
 function openEditModal(id) {
-  fetch(`/api/library/${id}`).then(r => r.json()).then(t => {
+  fetch(`/api/library/${id}`).then(r => r.json()).then(tr => {
     editingId = id;
-    document.getElementById('edit-artist').value = t.artist || '';
-    document.getElementById('edit-title').value = t.title || '';
-    document.getElementById('edit-album').value = t.album || '';
+    document.getElementById('edit-artist').value = tr.artist || '';
+    document.getElementById('edit-title').value = tr.title || '';
+    document.getElementById('edit-album').value = tr.album || '';
     document.getElementById('edit-modal').style.display = 'flex';
   });
 }
@@ -525,10 +558,10 @@ async function saveEdit() {
   };
   try {
     await api(`/api/library/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
-    toast('Track updated');
+    toast(t('common.updated'));
     closeModal('edit-modal');
     loadLibrary();
-  } catch (e) { toast('Error: ' + e.message, true); }
+  } catch (e) { toast(t('common.error', {msg: e.message}), true); }
 }
 
 function closeModal(id) {
@@ -563,7 +596,7 @@ document.getElementById('upload-file').addEventListener('change', function() {
 
 async function doUpload() {
   const file = document.getElementById('upload-file').files[0];
-  if (!file) { toast('Choose a file', true); return; }
+  if (!file) { toast(t('common.chooseFile'), true); return; }
   const form = new FormData();
   form.append('file', file);
   form.append('artist', document.getElementById('upload-artist').value);
@@ -573,10 +606,10 @@ async function doUpload() {
     const r = await fetch('/api/library/upload', { method: 'POST', body: form });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'upload failed');
-    toast('Uploaded');
+    toast(t('common.uploaded'));
     closeModal('upload-modal');
     loadLibrary();
-  } catch (e) { toast('Error: ' + e.message, true); }
+  } catch (e) { toast(t('common.error', {msg: e.message}), true); }
 }
 
 let loadingMore = false;
@@ -647,7 +680,7 @@ document.getElementById('search').addEventListener('input', debounce(() => {
   state.query = document.getElementById('search').value; state.offset = 0; saveFilters(); loadLibrary();
 }, 300));
 document.querySelectorAll('.sortable').forEach(th => {
-  th.addEventListener('click', () => { state.sort = th.dataset.sort; state.offset = 0; saveFilters(); loadLibrary(); });
+  th.addEventListener('click', () => handleSortClick(th.dataset.sort));
 });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
@@ -757,97 +790,14 @@ function restorePlayerState() {
 audio.volume = parseFloat(document.getElementById('volume-slider').value);
 document.getElementById('shuffle-btn').style.opacity = '0.5';
 restoreFilters();
-// Reflect restored filters in the controls before the first render.
 document.getElementById('search').value = state.query;
-document.getElementById('sort-by').value = state.sort;
-document.getElementById('sort-order').textContent = state.order === 'asc' ? '↑ Asc' : '↓ Desc';
+updateSortArrows();
 loadStats(); loadLibrary();
 restorePlayerState();
-
-// ---- Background jobs widget ----
-let jobsPollTimer = null;
-
-async function pollJobs() {
-  try {
-    const r = await fetch('/api/jobs');
-    if (!r.ok) return;
-    const d = await r.json();
-    renderJobs(d.jobs || [], d.running || 0);
-  } catch (e) { /* ignore */ }
-}
-
-function renderJobs(jobs, running) {
-  const toggle = document.getElementById('jobs-toggle');
-  const countEl = document.getElementById('jobs-count');
-  if (!running && !jobs.length) {
-    toggle.style.display = 'none';
-    document.getElementById('jobs-panel').style.display = 'none';
-    return;
-  }
-  toggle.style.display = 'inline-block';
-  countEl.textContent = running;
-
-  const panel = document.getElementById('jobs-panel');
-  const isOpen = panel.style.display === 'block';
-  panel.innerHTML = jobs.map(j => {
-    const p = j.progress || {ok: 0, failed: 0, total: 0};
-    const pct = p.total > 0 ? Math.round((p.ok + p.failed) / p.total * 100) : 0;
-    const statusIcon = j.done
-      ? (j.error ? '❌' : '✅')
-      : (j.cancelled ? '⏹' : '⏳');
-    const detail = j.done && j.error
-      ? `<span class="job-error">${escape(j.error)}</span>`
-      : `<span class="job-meta">${p.ok} done${p.failed ? ', ' + p.failed + ' failed' : ''} / ${p.total}</span>`;
-    return `<div class="job-item">
-      <div class="job-head">
-        <span>${statusIcon} ${escape(j.title)}</span>
-        <span class="job-pct">${pct}%</span>
-        ${j.done ? '' : `<button class="btn-job-stop" onclick="cancelJob('${j.id}')" title="Stop job">⏹</button>`}
-      </div>
-      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-      ${detail}
-    </div>`;
-  }).join('');
-  if (isOpen) panel.style.display = 'block';
-}
-
-async function cancelJob(id) {
-  if (!confirm('Stop this job?')) return;
-  try {
-    await api(`/api/download/${id}`, { method: 'DELETE' });
-    toast('Job stopped');
-  } catch (e) { toast('Error: ' + e.message, true); }
-}
-
-function toggleJobsPanel() {
-  const panel = document.getElementById('jobs-panel');
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-  if (panel.style.display === 'block') pollJobs();
-}
-
-// ---- Sorting controls ----
-function toggleSortOrder() {
-  state.order = state.order === 'asc' ? 'desc' : 'asc';
-  const btn = document.getElementById('sort-order');
-  btn.textContent = state.order === 'asc' ? '↑ Asc' : '↓ Desc';
-  state.offset = 0;
-  saveFilters();
-  loadLibrary();
-}
-
-document.getElementById('sort-by').addEventListener('change', () => {
-  state.sort = document.getElementById('sort-by').value;
-  state.offset = 0;
-  saveFilters();
-  loadLibrary();
+window.addEventListener('langchange', function() {
+  applyI18n();
+  renderTracks();
 });
-
-// Poll every 2s; stop when idle to save requests
-jobsPollTimer = setInterval(() => {
-  const toggle = document.getElementById('jobs-toggle');
-  if (toggle && toggle.style.display !== 'none') pollJobs();
-}, 2000);
-pollJobs();
 
 // Close any open row menu when clicking elsewhere
 document.addEventListener('click', (e) => {

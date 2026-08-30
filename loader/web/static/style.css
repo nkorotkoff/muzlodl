@@ -101,8 +101,11 @@ th { background: var(--bg-elev); color: var(--text-dim); font-weight: 600; posit
 tbody tr { transition: background .1s; }
 tbody tr:hover td { background: var(--bg-hover); }
 tr:last-child td { border-bottom: none; }
-.sortable { cursor: pointer; user-select: none; transition: color .15s; }
+.sortable { cursor: pointer; user-select: none; transition: color .15s; white-space: nowrap; }
 .sortable:hover { color: var(--text); }
+.sortable.sorted { color: var(--text); }
+.sort-arrow { font-size: .75em; }
+.muted { color: var(--text-dim); font-size: .82rem; }
 .empty { text-align: center; color: var(--text-faint); padding: 3rem !important; }
 
 /* ---- Badges ---- */
@@ -171,7 +174,11 @@ label input[type="checkbox"] { width: auto; margin-right: .5rem; accent-color: v
 .progress-fill { height: 100%; background: var(--green); width: 0%; transition: width .4s ease; }
 
 /* ---- Scroll sentinel ---- */
-.scroll-sentinel { height: 1px; margin-top: 1rem; }
+.scroll-sentinel {
+  min-height: 1px; margin-top: 1rem;
+  text-align: center; color: var(--text-faint); font-size: .82rem;
+  padding: .4rem 0; user-select: none;
+}
 
 /* ---- Player bar ---- */
 #player {
@@ -363,6 +370,16 @@ tr.row-playing td { background: var(--green-soft) !important; }
 .result-score { color: var(--accent); font-size: .85rem; font-weight: 600; min-width: 3em; text-align: right; }
 .result-dur { color: var(--text-faint); font-size: .8rem; min-width: 3em; text-align: right; }
 
+/* ---- Language switch ---- */
+.lang-switch { display: flex; gap: 2px; align-items: center; margin-left: .5rem; }
+.lang-switch button {
+  background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-dim);
+  padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: .75rem; font-weight: 600;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.lang-switch button:hover { background: var(--bg-elev); color: var(--text); }
+.lang-switch button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+
 /* ---- Background jobs widget ---- */
 .nav-jobs { position: relative; margin-left: auto; }
 #jobs-toggle { display: none; padding: .35rem .7rem; font-size: .8rem; }
@@ -394,6 +411,16 @@ tr.row-playing td { background: var(--green-soft) !important; }
 .stat-sub { display: block; font-size: .78rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-count { color: var(--accent); font-weight: 600; font-size: .85rem; }
 .stat-time { color: var(--text-dim); font-weight: 400; font-size: .8rem; }
+
+/* ---- Settings tabs ---- */
+.settings-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
+.settings-tabs { display: flex; flex-direction: column; gap: 4px; min-width: 160px; position: sticky; top: 64px; }
+.settings-tabs [role="tab"] { text-align: left; background: transparent; border: 1px solid transparent; color: var(--text-dim); padding: .5rem .75rem; border-radius: var(--radius-sm); cursor: pointer; font-size: .9rem; }
+.settings-tabs [role="tab"]:hover { background: var(--bg-elev); color: var(--text); }
+.settings-tabs [role="tab"].tab-active { background: var(--bg-elev); border-color: var(--border); color: var(--text); font-weight: 600; }
+.settings-panels { flex: 1; min-width: 0; }
+.settings-panel[hidden] { display: none !important; }
+@media (max-width: 760px) { .settings-layout { flex-direction: column; } .settings-tabs { flex-direction: row; overflow-x: auto; min-width: 0; width: 100%; position: static; } .settings-tabs [role="tab"] { white-space: nowrap; } }
 
 /* ---- Scrollbar ---- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

@@ -61,3 +61,6 @@ Thumbs.db
 # PyInstaller leftovers
 *.manifest
 *.spec.cache
+.gitignore
+.commandcode/taste/taste/taste.md
+.commandcode/taste/taste.md

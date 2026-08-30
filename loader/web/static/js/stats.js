@@ -5,6 +5,7 @@ function fmtTime(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 }
+function tr(k, p) { try { return t(k, p); } catch(e) { return k; } }
 
 async function loadStats() {
   try {
@@ -13,7 +14,7 @@ async function loadStats() {
 
     const s = d.summary || {};
     document.getElementById('summary-stats').textContent =
-      `${s.total_plays || 0} plays · ${s.unique_tracks || 0} tracks · ${s.last_7_days || 0} this week`;
+      tr('stats.summary', {total: s.total_plays || 0, unique: s.unique_tracks || 0, week: s.last_7_days || 0});
 
     // Top tracks
     const tt = document.getElementById('top-tracks');
@@ -27,7 +28,7 @@ async function loadStats() {
           </div>
           <span class="stat-count">${t.plays}×</span>
         </div>`).join('')
-      : '<p class="hint">No plays yet — play some music!</p>';
+      : '<p class="hint">' + tr('stats.noPlays') + '</p>';
 
     // Top artists
     const ta = document.getElementById('top-artists');
@@ -41,7 +42,7 @@ async function loadStats() {
           </div>
           <span class="stat-count">${a.plays}×</span>
         </div>`).join('')
-      : '<p class="hint">No plays yet</p>';
+      : '<p class="hint">' + tr('stats.noPlaysShort') + '</p>';
 
     // Recently played
     const rl = document.getElementById('recent-list');
@@ -54,10 +55,11 @@ async function loadStats() {
           </div>
           <span class="stat-count stat-time">${fmtTime(t.played_at)}</span>
         </div>`).join('')
-      : '<p class="hint">No plays yet</p>';
+      : '<p class="hint">' + tr('stats.noPlaysShort') + '</p>';
   } catch (e) {
     document.getElementById('top-tracks').innerHTML = '<p class="error">Failed to load stats</p>';
   }
 }
 
 loadStats();
+window.addEventListener('langchange', function() { try { applyI18n(); loadStats(); } catch(e) {} });

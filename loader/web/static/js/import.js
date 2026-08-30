@@ -30,15 +30,15 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
       : type === 'json' ? parseJSON(text)
       : parseText(text);
   } catch (err) {
-    toast('Parse error: ' + err.message, true);
+    toast(t('import.toast.parseError', {msg: err.message}), true);
     return;
   }
   if (parsed.length) {
     parsed.forEach(t => pendingTracks.push(t));
     renderTrackList();
-    toast(`Added ${parsed.length} tracks from ${file.name}`);
+    toast(t('import.toast.added', {n: parsed.length, name: file.name}));
   } else {
-    toast('No tracks found in file', true);
+    toast(t('import.toast.noTracks'), true);
   }
 });
 
@@ -91,7 +91,7 @@ function savePending() {
 function addTrack() {
   const artist = document.getElementById('input-artist').value.trim();
   const title = document.getElementById('input-title').value.trim();
-  if (!title) { toast('Title is required', true); return; }
+  if (!title) { toast(t('import.toast.titleRequired'), true); return; }
   pendingTracks.push({ artist, title, album: '' });
   savePending();
   document.getElementById('input-title').value = '';
@@ -118,22 +118,22 @@ function renderTrackList() {
   const dlBtn = document.getElementById('download-btn');
   if (!pendingTracks.length) {
     box.style.display = 'none';
-    if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '▶ Download'; dlBtn.title = 'Add tracks first'; }
+    if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = t('import.download'); dlBtn.title = t('import.downloadAddFirst'); }
     return;
   }
   box.style.display = 'block';
-  if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '▶ Download (' + pendingTracks.length + ')'; dlBtn.title = ''; }
+  if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = t('import.downloadCount', {n: pendingTracks.length}); dlBtn.title = ''; }
   const noArtist = pendingTracks.filter(t => !t.artist);
   document.getElementById('status-heading').textContent =
-    'Track list (' + pendingTracks.length + ')'
-    + (noArtist.length ? ' — ⚠ ' + noArtist.length + ' без артиста' : '');
+    t('import.trackList', {n: pendingTracks.length})
+    + (noArtist.length ? ' — ' + t('import.noArtistWarn', {n: noArtist.length}) : '');
   tbody.innerHTML = pendingTracks.map((t, i) => {
     const artistCell = t.artist
       ? escape(t.artist)
-      : '<span class="no-artist">⚠ нет артиста</span>';
+      : '<span class="no-artist">' + t('import.noArtist') + '</span>';
     const badge = !t.artist
-      ? '<span class="badge badge-failed" title="Формат: Artist - Title">⚠ не скачается</span>'
-      : '<span class="badge badge-pending">⏳ not started</span>';
+      ? '<span class="badge badge-failed">' + t('import.wontDownload') + '</span>'
+      : '<span class="badge badge-pending">' + t('import.pending') + '</span>';
     return '<tr>'
       + '<td>' + artistCell + '</td>'
       + '<td>' + escape(t.title || '') + '</td>'
@@ -187,7 +187,7 @@ loadPending();
 renderTrackList();
 
 async function startDownload() {
-  if (!pendingTracks.length) { toast('Add tracks first', true); return; }
+  if (!pendingTracks.length) { toast(t('import.toast.addFirst'), true); return; }
   // Send structured tracks — no text round-trip, so titles/albums
   // containing " - " survive intact.
   const tracks = pendingTracks.map(t => ({
@@ -221,7 +221,7 @@ async function startDownload() {
     pollJob(resp.job_id, resp.total);
     pollTracks(resp.session_id);
   } catch (e) {
-    toast('Error: ' + e.message, true);
+    toast(t('common.error', {msg: e.message}), true);
     prog.style.display = 'none';
   }
 }
@@ -234,56 +234,179 @@ function escape(s) {
   const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML;
 }
 
-function pollTracks(sessionId) {
-  if (trackPollTimer) clearInterval(trackPollTimer);
-  trackPollTimer = setInterval(async () => {
-    try {
-      const r = await fetch(`/api/imports/${sessionId}`);
-      if (!r.ok) return;
-      const d = await r.json();
-      renderStatusTable(d.tracks || []);
-      // Stop polling once every track reached a final state
-      const tracks = d.tracks || [];
-      const final = t => t.status === 'ok' || t.status === 'cached' || t.status === 'failed';
-      if (tracks.length && tracks.every(final)) {
-        clearInterval(trackPollTimer);
-        trackPollTimer = null;
-      }
-    } catch (e) { /* ignore */ }
-  }, 1500);
+// ---- Session track lists: infinite scroll pagination ----
+const PAGE_SIZE = 100;
+// sid -> {loaded, total, loading}
+const sessionState = {};
+
+function sessionListEl(sid) {
+  return sid === currentSession
+    ? document.getElementById('status-tbody')
+    : document.getElementById('session-' + sid);
 }
 
-function renderStatusTable(tracks) {
-  const tbody = document.getElementById('status-tbody');
-  tbody.innerHTML = tracks.map(t => {
-    const badge = t.status === 'ok'
-      ? '<span class="badge badge-ok">✅ downloaded</span>'
-      : t.status === 'cached'
-        ? '<span class="badge badge-cached">↺ already have</span>'
-        : t.status === 'failed'
-          ? '<span class="badge badge-failed">❌ failed</span>'
-          : '<span class="badge badge-pending">⏳ pending</span>';
-    const retry = t.status === 'failed'
-      ? `<button class="btn-retry" data-id="${t.id}" title="Retry">↻</button>`
-      : '';
-    return `<tr>
-      <td>${escape(t.artist)}</td>
-      <td>${escape(t.title)}</td>
-      <td>${escape(t.album)}</td>
-      <td>${badge} ${retry}</td>
-      <td></td>
-    </tr>`;
-  }).join('');
+function badgeHTML(status) {
+  return status === 'ok'
+    ? '<span class="badge badge-ok">' + t('import.status.downloaded') + '</span>'
+    : status === 'cached'
+      ? '<span class="badge badge-cached">' + t('import.status.cached') + '</span>'
+      : status === 'failed'
+        ? '<span class="badge badge-failed">' + t('import.status.failed') + '</span>'
+        : '<span class="badge badge-pending">' + t('import.status.pending') + '</span>';
+}
 
-  tbody.querySelectorAll('.btn-retry').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      btn.textContent = '…';
-      try {
-        await fetch(`/api/library/${btn.dataset.id}/retry`, { method: 'POST' });
-      } catch (e) {}
-      btn.textContent = '↻';
+function trackRowHTML(t, extraCell) {
+  const retry = t.status === 'failed'
+    ? `<button class="btn-retry" data-id="${t.id}" title="Retry">↻</button>`
+    : '';
+  return `<tr>
+    <td>${escape(t.artist)}</td>
+    <td>${escape(t.title)}</td>
+    <td>${escape(t.album)}</td>
+    <td>${badgeHTML(t.status)} ${retry}</td>${extraCell || ''}
+  </tr>`;
+}
+
+function tracksTableHTML(tracks) {
+  return '<table><thead><tr><th>Artist</th><th>Title</th><th>Album</th><th>Status</th></tr></thead><tbody>'
+    + tracks.map(t => trackRowHTML(t)).join('')
+    + '</tbody></table>';
+}
+
+function sentinelHTML(sid) {
+  return `<div class="scroll-sentinel" data-sid="${sid}"></div>`;
+}
+
+const scrollIO = ('IntersectionObserver' in window)
+  ? new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const el = en.target;
+        if (!el.classList.contains('active')) continue;
+        loadMoreTracks(Number(el.dataset.sid));
+      }
+    }, { rootMargin: '300px' })
+  : null;
+
+if (!scrollIO) {
+  window.addEventListener('scroll', () => {
+    document.querySelectorAll('.scroll-sentinel.active').forEach(s => {
+      if (s.getBoundingClientRect().top < innerHeight + 300) {
+        loadMoreTracks(Number(s.dataset.sid));
+      }
     });
-  });
+  }, { passive: true });
+}
+
+function updateSentinel(sid) {
+  const st = sessionState[sid];
+  const s = document.querySelector(`.scroll-sentinel[data-sid="${sid}"]`);
+  if (!s || !st) return;
+  s.classList.remove('active');
+  if (st.loading) {
+    s.textContent = t('infinite.loading');
+    s.classList.add('active');
+  } else if (st.total > st.loaded) {
+    s.textContent = t('infinite.more', {remaining: st.total - st.loaded, total: st.total});
+    s.classList.add('active');
+  } else if (st.total > PAGE_SIZE) {
+    s.textContent = t('infinite.allShown', {total: st.total});
+  } else {
+    s.textContent = '';
+  }
+  if (scrollIO && s.dataset.watched !== '1') {
+    s.dataset.watched = '1';
+    scrollIO.observe(s);
+  }
+}
+
+async function loadMoreTracks(sid) {
+  const st = sessionState[sid];
+  if (!st || st.loading || st.loaded >= st.total) return;
+  st.loading = true;
+  updateSentinel(sid);
+  try {
+    const r = await fetch(`/api/imports/${sid}?limit=${PAGE_SIZE}&offset=${st.loaded}`);
+    if (r.ok) {
+      const d = await r.json();
+      const rows = d.tracks || [];
+      st.total = d.total || rows.length;
+      if (rows.length) {
+        const el = sessionListEl(sid);
+        if (el) {
+          const html = rows.map(t =>
+            sid === currentSession ? trackRowHTML(t, '<td></td>') : trackRowHTML(t)
+          ).join('');
+          if (el.tagName === 'TBODY') {
+            el.insertAdjacentHTML('beforeend', html);
+          } else {
+            const tb = el.querySelector('tbody');
+            if (tb) tb.insertAdjacentHTML('beforeend', html);
+          }
+          st.loaded += rows.length;
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+  st.loading = false;
+  updateSentinel(sid);
+}
+
+// Full re-render of everything loaded so far (used by status polling).
+async function refreshSessionTracks(sid) {
+  try {
+    let st = sessionState[sid];
+    if (!st) { st = sessionState[sid] = { loaded: 0, total: 0 }; }
+    const limit = Math.min(Math.max(st.loaded, PAGE_SIZE), 500);
+    const r = await fetch(`/api/imports/${sid}?limit=${limit}&offset=0`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const tracks = d.tracks || [];
+    st.total = d.total;
+    // We just replaced the whole list — synced count must match the DOM
+    // (the API caps limit at 500, so deep scroll positions reset cleanly).
+    st.loaded = tracks.length;
+    renderSessionTracks(sid, tracks);
+    updateSentinel(sid);
+    return d;
+  } catch (e) { return null; }
+}
+
+function renderSessionTracks(sid, tracks) {
+  const el = sessionListEl(sid);
+  if (!el) return;
+  if (sid === currentSession && el.tagName === 'TBODY') {
+    el.innerHTML = tracks.map(t => trackRowHTML(t, '<td></td>')).join('');
+    const host = document.getElementById('status-pager');
+    if (host) host.innerHTML = sentinelHTML(sid);
+  } else {
+    el.innerHTML = tracksTableHTML(tracks) + sentinelHTML(sid);
+  }
+}
+
+// Retry buttons are delegated — safe across innerHTML re-renders and appends.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.btn-retry');
+  if (!btn) return;
+  btn.textContent = '…';
+  try { await fetch(`/api/library/${btn.dataset.id}/retry`, { method: 'POST' }); } catch (err) {}
+  btn.textContent = '↻';
+});
+
+function pollTracks(sessionId) {
+  sessionState[sessionId] = { loaded: 0, total: 0 };
+  if (trackPollTimer) clearInterval(trackPollTimer);
+  trackPollTimer = setInterval(async () => {
+    const d = await refreshSessionTracks(sessionId);
+    if (!d) return;
+    // Stop once every track in the session reached a final state
+    // (use session counters — visible rows may not cover all tracks)
+    const s = d.session || {};
+    if ((s.downloaded || 0) + (s.failed || 0) >= (s.total || 0)) {
+      clearInterval(trackPollTimer);
+      trackPollTimer = null;
+    }
+  }, 1500);
 }
 
 function pollJob(jobId, total) {
@@ -295,13 +418,13 @@ function pollJob(jobId, total) {
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
       document.getElementById('progress-fill').style.width = Math.min(pct, 100) + '%';
       document.getElementById('progress-text').textContent =
-        `${p.ok} ok, ${p.failed} failed, ${total - done} remaining`;
+        t('import.progressOkFailed', {ok: p.ok, failed: p.failed, remaining: total - done});
       if (s.done || s.cancelled) {
         clearInterval(interval);
         if (s.cancelled) {
-          document.getElementById('progress-text').textContent = 'Cancelled';
+          document.getElementById('progress-text').textContent = t('common.cancelled');
         } else {
-          document.getElementById('progress-text').textContent = '✅ Complete!';
+          document.getElementById('progress-text').textContent = t('common.complete');
         }
         currentJob = null;
       }
@@ -349,7 +472,7 @@ function applyRecentFilter() {
 
   const shown = filtered.slice(0, recentShown);
   if (!shown.length) {
-    el.innerHTML = '<p class="hint">' + (q ? 'Nothing matches the filter' : 'No imports yet') + '</p>';
+    el.innerHTML = '<p class="hint">' + (q ? t('import.noMatchFilter') : t('import.noImports')) + '</p>';
     return;
   }
 
@@ -373,7 +496,7 @@ function applyRecentFilter() {
     const more = document.createElement('div');
     more.style.textAlign = 'center';
     more.style.margin = '.5rem 0';
-    more.innerHTML = `<button onclick="recentShown += 20; applyRecentFilter()">Show more (${filtered.length - shown.length} more)</button>`;
+    more.innerHTML = '<button onclick="recentShown += 20; applyRecentFilter()">' + t('import.showMore', {n: filtered.length - shown.length}) + '</button>';
     el.appendChild(more);
   }
 
@@ -419,33 +542,22 @@ function toggleSession(sid, force) {
 
 function startSessionPoll(sid) {
   if (recentTimers[sid]) clearInterval(recentTimers[sid]);
+  if (!sessionState[sid]) sessionState[sid] = { loaded: 0, total: 0 };
   const poll = async () => {
-    try {
-      const r = await fetch(`/api/imports/${sid}`);
-      if (!r.ok) return;
-      const d = await r.json();
-      const body = document.getElementById('session-' + sid);
-      if (!body) { stopSessionPoll(sid); return; }
-      body.innerHTML = renderTracksTable(d.tracks || []);
-      // Re-bind retry buttons
-      body.querySelectorAll('.btn-retry').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          btn.textContent = '…';
-          try { await fetch(`/api/library/${btn.dataset.id}/retry`, { method: 'POST' }); } catch (e) {}
-          btn.textContent = '↻';
-        });
-      });
-      // Stop when session fully done — update counters in place, don't
-      // re-render the whole list (that would re-trigger polls → loop).
-      if (d.session && d.session.downloaded + d.session.failed >= d.session.total) {
-        stopSessionPoll(sid);
-        const row = document.querySelector(`.recent-item[data-sid="${sid}"] .recent-meta`);
-        if (row) {
-          const s = d.session;
-          row.textContent = fmtTime(s.created_at) + ' · ' + (s.downloaded + s.failed) + '/' + s.total + ' (' + Math.round((s.downloaded + s.failed) / s.total * 100) + '%)';
-        }
+    const d = await refreshSessionTracks(sid);
+    if (!d) return;
+    const body = document.getElementById('session-' + sid);
+    if (!body) { stopSessionPoll(sid); return; }
+    // Stop when session fully done — update counters in place, don't
+    // re-render the whole list (that would re-trigger polls → loop).
+    if (d.session && d.session.downloaded + d.session.failed >= d.session.total) {
+      stopSessionPoll(sid);
+      const row = document.querySelector(`.recent-item[data-sid="${sid}"] .recent-meta`);
+      if (row) {
+        const s = d.session;
+        row.textContent = fmtTime(s.created_at) + ' · ' + (s.downloaded + s.failed) + '/' + s.total + ' (' + Math.round((s.downloaded + s.failed) / s.total * 100) + '%)';
       }
-    } catch (e) { /* ignore */ }
+    }
   };
   poll();
   recentTimers[sid] = setInterval(poll, 1500);
@@ -453,29 +565,6 @@ function startSessionPoll(sid) {
 
 function stopSessionPoll(sid) {
   if (recentTimers[sid]) { clearInterval(recentTimers[sid]); delete recentTimers[sid]; }
-}
-
-function renderTracksTable(tracks) {
-  return '<table><thead><tr><th>Artist</th><th>Title</th><th>Album</th><th>Status</th></tr></thead><tbody>'
-    + tracks.map(t => {
-      const badge = t.status === 'ok'
-        ? '<span class="badge badge-ok">✅ downloaded</span>'
-        : t.status === 'cached'
-          ? '<span class="badge badge-cached">↺ already have</span>'
-          : t.status === 'failed'
-            ? '<span class="badge badge-failed">❌ failed</span>'
-            : '<span class="badge badge-pending">⏳ pending</span>';
-      const retry = t.status === 'failed'
-        ? `<button class="btn-retry" data-id="${t.id}" title="Retry">↻</button>`
-        : '';
-      return `<tr>
-        <td>${escape(t.artist)}</td>
-        <td>${escape(t.title)}</td>
-        <td>${escape(t.album)}</td>
-        <td>${badge} ${retry}</td>
-      </tr>`;
-    }).join('')
-    + '</tbody></table>';
 }
 
 // Load recent imports on page load
@@ -496,60 +585,9 @@ async function cancelDownload() {
   if (!currentJob) return;
   try {
     await api(`/api/download/${currentJob}`, { method: 'DELETE' });
-    toast('Cancelled');
-  } catch (e) { toast('Error: ' + e.message, true); }
+    toast(t('common.cancelled'));
+  } catch (e) { toast(t('common.error', {msg: e.message}), true); }
 }
 
-// ---- Background jobs widget ----
-function escape(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
-async function pollJobs() {
-  try {
-    const r = await fetch("/api/jobs");
-    if (!r.ok) return;
-    const d = await r.json();
-    renderJobs(d.jobs || [], d.running || 0);
-  } catch (e) {}
-}
-function renderJobs(jobs, running) {
-  const toggle = document.getElementById("jobs-toggle");
-  if (!toggle) return;
-  if (!running && !jobs.length) {
-    toggle.style.display = "none";
-    const p = document.getElementById("jobs-panel");
-    if (p) p.style.display = "none";
-    return;
-  }
-  toggle.style.display = "inline-block";
-  document.getElementById("jobs-count").textContent = running;
-  const panel = document.getElementById("jobs-panel");
-  const isOpen = panel.style.display === "block";
-  panel.innerHTML = jobs.map(j => {
-    const p = j.progress || {ok: 0, failed: 0, total: 0};
-    const pct = p.total > 0 ? Math.round((p.ok + p.failed) / p.total * 100) : 0;
-    const statusIcon = j.done ? (j.error ? "❌" : "✅") : (j.cancelled ? "⏹" : "⏳");
-    const detail = j.done && j.error
-      ? "<span class=\"job-error\">" + escape(j.error) + "</span>"
-      : "<span class=\"job-meta\">" + p.ok + " done" + (p.failed ? ", " + p.failed + " failed" : "") + " / " + p.total + "</span>";
-    const stop = j.done ? "" : "<button class=\"btn-job-stop\" onclick=\"cancelJob('" + j.id + "')\" title=\"Stop job\">⏹</button>";
-    return "<div class=\"job-item\"><div class=\"job-head\"><span>" + statusIcon + " " + escape(j.title) + "</span><span class=\"job-pct\">" + pct + "%</span>" + stop + "</div><div class=\"progress-bar\"><div class=\"progress-fill\" style=\"width:" + pct + "%\"></div></div>" + detail + "</div>";
-  }).join("");
-  if (isOpen) panel.style.display = "block";
-}
-async function cancelJob(id) {
-  if (!confirm('Stop this job?')) return;
-  try {
-    await api(`/api/download/${id}`, { method: 'DELETE' });
-    toast('Job stopped');
-  } catch (e) { toast('Error: ' + e.message, true); }
-}
-function toggleJobsPanel() {
-  const panel = document.getElementById("jobs-panel");
-  panel.style.display = panel.style.display === "block" ? "none" : "block";
-  if (panel.style.display === "block") pollJobs();
-}
-setInterval(() => {
-  const toggle = document.getElementById("jobs-toggle");
-  if (toggle && toggle.style.display !== "none") pollJobs();
-}, 2000);
-pollJobs();
+window.addEventListener('langchange', function() { applyI18n(); renderTrackList(); applyRecentFilter(); updateSentinel(currentSession); });
 

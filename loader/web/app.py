@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 import flask
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 
 from . import auth, db, security
 from .core import LIBRARY, STATIC, TEMPLATES, _download_jobs, _jobs_lock, auto_import_log, auto_scan
@@ -146,30 +146,30 @@ def create_app() -> Flask:
         session.pop("authed", None)
         return jsonify({"ok": True})
 
-    # ---- Static SPA pages ----
+    # ---- App pages (Jinja layout) ----
     @app.route("/")
     def index():
-        return send_from_directory(str(STATIC), "index.html")
+        return render_template("index.html", active="library")
 
     @app.route("/search")
     def search_page():
-        return send_from_directory(str(STATIC), "search.html")
+        return render_template("search.html", active="search")
 
     @app.route("/import")
     def import_page():
-        return send_from_directory(str(STATIC), "import.html")
+        return render_template("import.html", active="import")
 
     @app.route("/history")
     def history_page():
-        return send_from_directory(str(STATIC), "history.html")
+        return render_template("history.html", active="history")
 
     @app.route("/settings")
     def settings_page():
-        return send_from_directory(str(STATIC), "settings.html")
+        return render_template("settings.html", active="settings")
 
     @app.route("/stats")
     def stats_page():
-        return send_from_directory(str(STATIC), "stats.html")
+        return render_template("stats.html", active="stats")
 
     # ---- Blueprints ----
     from .routes_library import bp as library_bp
@@ -383,11 +383,13 @@ def _resume_interrupted_jobs() -> None:
         log.info("resumed download job %s (%d pending tracks)", job_id, len(pending))
 
 
-# Preview cleanup thread (started once at import)
-from .core import cleanup_old_previews
+# Background threads (started once at import)
+from .core import cleanup_old_previews, library_watcher
 
 _thread = threading.Thread(target=cleanup_old_previews, daemon=True)
 _thread.start()
+_sync_thread = threading.Thread(target=library_watcher, daemon=True)
+_sync_thread.start()
 # Resume jobs that were running before the previous server died.
 _resume_thread = threading.Thread(target=_resume_interrupted_jobs, daemon=True)
 _resume_thread.start()

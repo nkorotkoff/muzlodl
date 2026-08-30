@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block title %}Stats — music-loader{% endblock %}
+{% block content %}
+<main>
+  <header class="page-header">
+    <h1 data-i18n="stats.title">Listening stats</h1>
+    <span class="stats" id="summary-stats"></span>
+  </header>
+
+  <div class="stats-grid">
+    <div class="card">
+      <h3 data-i18n="stats.topTracks">Top tracks</h3>
+      <div id="top-tracks" class="stats-list"></div>
+    </div>
+    <div class="card">
+      <h3 data-i18n="stats.topArtists">Top artists</h3>
+      <div id="top-artists" class="stats-list"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <h3 data-i18n="stats.recentlyPlayed">Recently played</h3>
+    <div id="recent-list" class="stats-list"></div>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/js/stats.js"></script>{% endblock %}

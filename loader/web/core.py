@@ -107,6 +107,49 @@ def auto_import_log() -> None:
             log.info("imported %d failed tracks from log", result["added"])
 
 
+def sync_library() -> dict:
+    """One-shot sync: index new files + mark vanished files as missing.
+
+    - New disk files not yet in DB are indexed via scan_library (status=ok).
+    - DB rows with file_path whose file vanished are marked status=missing
+      (cleared file_path/size) so Library hides them but Retry can restore them.
+    Returns {"added": int, "missing": int}.
+    """
+    lib = Path(LIBRARY)
+    if not lib.exists():
+        return {"added": 0, "missing": 0}
+    added = db.scan_library(lib)
+    missing = 0
+    with db.tx() as conn:
+        rows = conn.execute(
+            "SELECT id, file_path FROM tracks WHERE file_path != '' AND status != 'missing'"
+        ).fetchall()
+    for r in rows:
+        if not (lib / r["file_path"]).exists():
+            with db.tx() as conn:
+                conn.execute(
+                    "UPDATE tracks SET status='missing', file_path='', file_size=0 WHERE id=?",
+                    (r["id"],),
+                )
+            missing += 1
+    if missing:
+        from .models.track import _cleanup_empty_dirs
+        _cleanup_empty_dirs()
+        log.info("library sync: marked %d missing", missing)
+    if added:
+        log.info("library sync: indexed %d new files", added)
+    return {"added": added, "missing": missing}
+
+
+def library_watcher(interval: int = 30) -> None:
+    while True:
+        time.sleep(interval)
+        try:
+            sync_library()
+        except Exception as e:
+            log.debug("library sync failed: %s", e)
+
+
 def fmt_size(b: int) -> str:
     if b > 10 ** 9:
         return f"{b / 10 ** 9:.1f}GB"
