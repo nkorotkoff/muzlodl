@@ -248,9 +248,7 @@ def scan_library(library_dir: Path) -> int:
     """Walk existing library on disk and index files not yet in DB."""
     from .session import create as create_session
 
-    added = 0
-    session_id = None
-
+    pending: list = []
     for f in sorted(library_dir.rglob("*")):
         if not f.is_file() or f.suffix.lower() not in (".opus", ".mp3"):
             continue
@@ -270,14 +268,17 @@ def scan_library(library_dir: Path) -> int:
         title = stem
         if " - " in stem:
             _, title = stem.split(" - ", 1)
+        pending.append((f, rel, artist, title, album))
 
-        if session_id is None:
-            session_id = create_session(
-                source="scan",
-                source_name="Library scan (pre-existing files)",
-                total=0,
-            )
+    if not pending:
+        return 0
 
+    session_id = create_session(
+        source="scan",
+        source_name="Library scan (pre-existing files)",
+        total=len(pending),
+    )
+    for f, rel, artist, title, album in pending:
         add(
             session_id=session_id,
             artist=artist,
@@ -289,9 +290,11 @@ def scan_library(library_dir: Path) -> int:
             status="ok",
             source_name="",
         )
-        added += 1
-
-    return added
+    with tx() as conn:
+        conn.execute(
+            "UPDATE import_sessions SET downloaded=? WHERE id=?", (len(pending), session_id)
+        )
+    return len(pending)
 
 
 def _probe_duration(path: Path) -> float:

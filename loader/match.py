@@ -47,7 +47,7 @@ VERSION_MARKERS = [
     # NOTE: remaster(?:ed)? — "remastered?" would be "remastere" + "d?".
     r"\b\d{4}\s*[-–—]?\s*remaster(?:ed)?\b",
     r"\bremaster(?:ed)?\s*\d{4}\b",
-    r"\blive\b", r"\bremix\b", r"\bcover\b", r"\binstrumental\b",
+    r"\blive\b", r"\bremix(?:ed)?\b", r"\bcover\b", r"\binstrumental\b",
     r"\bacoustic\b", r"\bkaraoke\b", r"\bdemo\b", r"\bslowed\b",
     r"\bspeed[\s\-_]?up\b", r"\bbootleg\b", r"\bparody\b", r"\btribute\b",
     r"\bnightcore\b", r"\b8[\s\-_]?bit\b", r"\blo[\s\-_]?fi\b",
@@ -61,6 +61,16 @@ VERSION_MARKERS = [
     r"\bкавер\b", r"\bремикс\b", r"\bминус\b", r"\bкараоке\b",
     r"\bпеределанн\w*\b", r"\bпеределка\b", r"\bперепевк\w*\b",
     r"\bинструментал\b", r"\bвживую\b", r"\bконцерт\b",
+    # Remix shorthands that skip the word "remix" entirely: RMX, VIP /
+    # club / extended mixes, phonk retags ("Track (Drift Phonk)" is a
+    # remix upload). The standalone genre words subsume the compound
+    # forms ("club mix", "vip mix", "phonk mix", "drift phonk",
+    # "extended mix") — no bare "\bmix\b" here, "Original Mix" (see
+    # STRIP_ONLY_PATTERNS) must stay a non-version.
+    r"\brmx\b", r"\brework\b", r"\bremake\b", r"\bflip\b", r"\bvip\b",
+    r"\bextended(?:\s*mix)?\b", r"\bclub(?:\s*mix)?\b", r"\bversion\b",
+    r"\bверсия\b", r"\bphonk\b", r"\bhyper\b", r"\bhyper[\s\-_]?phonk\b",
+    r"\bdrift\b", r"\bhouse\b", r"\btrance\b",
     # Video-only uploads (clips with extra audio, lyric videos, rips)
     r"\bofficial video\b", r"\bofficial audio\b", r"\bmusic video\b",
     r"\blyric video\b", r"\blyrics?\b", r"\bклип\b", r"\bвидеоклип\b",
@@ -305,14 +315,18 @@ def candidate_ok(
     # Covers by OTHER artists stay rejected. A "cover" word in the ARTIST
     # name means a cover channel ("УВУЛА (Cover шАг)") — never the artist.
     want_n = _norm(want_artist)
-    cand_v = cand_title
+    # Check version markers on the artist-stripped title, NOT the raw
+    # "Artist - Title" upload string: an artist whose name contains a
+    # marker word ("Ivan House", "…Live") would otherwise reject its own
+    # canonical tracks. `cand` already had the artist prefix removed.
+    cand_v = cand
     # _norm strips parens; a "cover" inside them ("УВУЛА (Cover шАг)")
     # would vanish — use the paren-preserving form.
     cover_in_artist = bool(re.search(r"\bcover\b|\bкавер\b", _soft_norm(cand_artist)))
     if want_n and not cover_in_artist and (
         want_n in _norm(cand_title) or want_n in _norm(cand_artist)
     ):
-        cand_v = re.sub(r"\bcover\b|\bкавер\b", " ", cand_title, flags=re.I)
+        cand_v = re.sub(r"\bcover\b|\bкавер\b", " ", cand_v, flags=re.I)
     if is_bad_version(cand_v, want_title):
         return False
     if want_artist and cand_artist:

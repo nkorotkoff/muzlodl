@@ -35,7 +35,7 @@ def update_stats(session_id: int) -> None:
 def list_recent(limit: int = 50) -> list[dict]:
     with tx() as conn:
         rows = conn.execute(
-            "SELECT * FROM import_sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM import_sessions WHERE source != 'scan' ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 

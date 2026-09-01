@@ -159,10 +159,6 @@ def create_app() -> Flask:
     def import_page():
         return render_template("import.html", active="import")
 
-    @app.route("/history")
-    def history_page():
-        return render_template("history.html", active="history")
-
     @app.route("/settings")
     def settings_page():
         return render_template("settings.html", active="settings")

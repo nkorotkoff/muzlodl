@@ -87,9 +87,11 @@ def auto_scan() -> None:
     with db.tx() as conn:
         count = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
     if count == 0:
-        log.info("DB is empty, scanning library...")
         added = db.scan_library(Path(LIBRARY))
-        log.info("indexed %d existing tracks", added)
+        if added:
+            log.info("indexed %d existing tracks", added)
+        else:
+            log.debug("library scan: no pre-existing files")
 
 
 def auto_import_log() -> None:
@@ -135,9 +137,10 @@ def sync_library() -> dict:
     if missing:
         from .models.track import _cleanup_empty_dirs
         _cleanup_empty_dirs()
-        log.info("library sync: marked %d missing", missing)
-    if added:
-        log.info("library sync: indexed %d new files", added)
+    if added or missing:
+        log.info("library sync: +%d -%d", added, missing)
+    else:
+        log.debug("library sync: no changes")
     return {"added": added, "missing": missing}
 
 
