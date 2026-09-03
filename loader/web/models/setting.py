@@ -14,7 +14,8 @@ DEFAULTS = {
     "quality": "128",
     "sources_auto": "true",
     "sources": json.dumps([
-        "youtube", "soundcloud", "lightaudio", "mp3party", "zaycev", "archiveorg",
+        "youtube", "soundcloud", "lightaudio", "mp3party", "sleymp3", "zaycev",
+        "archiveorg",
     ]),
     "max_path_len": "0",
     "enrich": "true",

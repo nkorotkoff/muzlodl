@@ -41,6 +41,22 @@ for pkg in ("yandex_music", "spotdl"):
     except ImportError:
         pass
 
+from pathlib import Path as _Path
+# Bundle Svelte dist when present (Vite outDir: loader/web/static/dist)
+_dist = _Path("loader/web/static/dist")
+if _dist.exists():
+    datas += [(str(_dist), "loader/web/static/dist")]
+
+# Bundle legacy Jinja/static for Frozen fallback (serve when dist not yet built)
+for _p in ["loader/web/static/dist"]:
+    _pp = _Path(_p)
+    if _pp.exists():
+        datas += [(str(_pp), _p)]
+for _p in ["loader/web/static/login.html", "loader/web/static/setup.html"]:
+    _pp = _Path(_p)
+    if _pp.exists():
+        datas += [(str(_pp), _p)]
+
 a = Analysis(
     ["loader/__main__.py"],
     pathex=[],

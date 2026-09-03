@@ -160,31 +160,39 @@ class MP3PartySource(Source):
         if not url:
             return False
         output_path = Path(output_path)
-        try:
-            with self._session.get(url, stream=True, timeout=self._timeout) as r:
-                r.raise_for_status()
-                with open(output_path, "wb") as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
-        except Exception as e:
-            log.warning(f"[mp3party] download {url}: {e}")
-            return False
-        # dl2.mp3party.net serves "failed to get file info: nil" (HTTP 200,
-        # audio/mpeg) when its backend hiccups. That's a 29-byte text file,
-        # not audio — reject it so the pipeline moves to the next source.
-        try:
-            with open(output_path, "rb") as f:
-                head = f.read(16)
-        except OSError:
-            return False
-        is_mp3 = head[:3] == b"ID3" or (head[0] == 0xFF and (head[1] & 0xE0) == 0xE0)
-        if not is_mp3:
+        headers = {
+            "Referer": "https://mp3party.net/",
+            "Accept": "audio/mpeg,audio/*;q=0.9,*/*;q=0.8",
+        }
+        for attempt in (0, 1):
+            try:
+                with self._session.get(url, stream=True, timeout=self._timeout, headers=headers) as r:
+                    r.raise_for_status()
+                    with open(output_path, "wb") as f:
+                        for chunk in r.iter_content(8192):
+                            f.write(chunk)
+            except Exception as e:
+                log.warning(f"[mp3party] download {url}: {e}")
+                return False
+            try:
+                with open(output_path, "rb") as f:
+                    head = f.read(16)
+            except OSError:
+                return False
+            is_mp3 = head[:3] == b"ID3" or (head[0] == 0xFF and (head[1] & 0xE0) == 0xE0)
+            if is_mp3:
+                self._breaker_ok()
+                return output_path.stat().st_size > 0
+            # junk (16/29b "failed to get file info") — retry once
             try:
                 output_path.unlink()
             except OSError:
                 pass
+            if attempt == 0:
+                log.warning(f"[mp3party] not an MP3 ({len(head)}b), retrying: {url}")
+                import time as _t; _t.sleep(1)
+                continue
             log.warning(f"[mp3party] not an MP3 ({len(head)}b), rejected: {url}")
             self._breaker_fail()
             return False
-        self._breaker_ok()
-        return output_path.stat().st_size > 0
+        return False

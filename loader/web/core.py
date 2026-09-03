@@ -12,8 +12,18 @@ log = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
-TEMPLATES = HERE / "templates"
+STATIC_DIST = STATIC / "dist"
 LIBRARY = HERE.parent.parent / "library"
+
+
+def _resolve_static() -> Path:
+    import sys
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).parents[2]))
+        cand = base / "loader" / "web" / "static"
+        if cand.exists():
+            return cand
+    return STATIC
 
 # Background job registry (downloads, re-encodes, cloud uploads)
 _download_jobs: dict[str, dict] = {}

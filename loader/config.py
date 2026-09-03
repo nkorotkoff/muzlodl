@@ -19,7 +19,7 @@ class Config:
     # are removed from the default chain to keep doctor output and download
     # logs clean. Pass --sources explicitly to re-enable any of them.
     enabled_sources: List[str] = field(default_factory=lambda: [
-        "youtube", "soundcloud", "lightaudio", "mp3party", "zaycev", "archiveorg",
+        "youtube", "soundcloud", "lightaudio", "mp3party", "sleymp3", "zaycev", "archiveorg",
     ])
 
     # Metadata enrichers (run before source chain, no audio).

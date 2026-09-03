@@ -1,7 +1,10 @@
 # Core (always required)
+Flask>=3.0
 yt-dlp>=2024.5.27
 mutagen>=1.47.0
 requests>=2.31.0
+beautifulsoup4>=4.12
+lxml>=5.0
 
 # Optional: install as needed
 # yandex-music>=2.1.1   # for Yandex Music source

@@ -307,6 +307,24 @@ tr.row-playing td { background: var(--green-soft) !important; }
 .track-input-row input { flex: 1; min-width: 0; }
 .track-input-row .btn-primary { flex-shrink: 0; }
 
+/* ---- Import drop zone ---- */
+.drop-zone {
+  display: flex; gap: 1rem; align-items: center;
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  background: var(--bg-elev); padding: 1rem 1.1rem; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.drop-zone:hover, .drop-zone:focus { border-color: var(--accent); background: var(--bg-hover); outline: none; }
+.drop-zone.drag-over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-icon { font-size: 1.6rem; color: var(--text-dim); flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.drop-title { font-weight: 600; font-size: .95rem; }
+.drop-hint { color: var(--text-dim); font-size: .82rem; margin-top: 2px; }
+.drop-hint code { color: var(--text-dim); background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: .78rem; }
+.queue-cell-edit { width: 100%; padding: .25rem .4rem; font-size: .85rem; }
+.drag-handle { cursor: grab; color: var(--text-faint); user-select: none; padding: 0 4px; }
+.drag-handle:active { cursor: grabbing; }
+tr.dragging { opacity: .5; }
+
 /* ---- Recent imports ---- */
 .no-artist { color: var(--yellow-text); font-size: .8rem; font-style: italic; }
 .recent-item {

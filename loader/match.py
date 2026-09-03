@@ -51,7 +51,8 @@ VERSION_MARKERS = [
     r"\bacoustic\b", r"\bkaraoke\b", r"\bdemo\b", r"\bslowed\b",
     r"\bspeed[\s\-_]?up\b", r"\bbootleg\b", r"\bparody\b", r"\btribute\b",
     r"\bnightcore\b", r"\b8[\s\-_]?bit\b", r"\blo[\s\-_]?fi\b",
-    r"\bsped up\b", r"\bslowed and reverb\b", r"\bchopped\b",
+    r"\bsped up\b", r"\bsped[\s\-_]?up\b", r"\bslowed and reverb\b",
+    r"\bchopped\b",
     r"\bscrewed\b", r"\bchipmunks?\b",
     r"\bbass boosted\b", r"\bmashup\b", r"\bedit version\b",
     r"\bremastered mix\b", r"\b8d audio\b", r"\bremix edit\b",
@@ -71,6 +72,13 @@ VERSION_MARKERS = [
     r"\bextended(?:\s*mix)?\b", r"\bclub(?:\s*mix)?\b", r"\bversion\b",
     r"\bверсия\b", r"\bphonk\b", r"\bhyper\b", r"\bhyper[\s\-_]?phonk\b",
     r"\bdrift\b", r"\bhouse\b", r"\btrance\b",
+    # Trap/bass genre retags ("Track (Trap Remix)", "(Bass Boosted)" —
+    # subsumes "\bbass boosted\b" above) and upload edits ("Trap Edit").
+    # The bare "\bedit\b" subsumes "radio edit"/"remix edit"/"edit
+    # version" above. Still NO bare "\bmix\b": "Original Mix"
+    # (STRIP_ONLY_PATTERNS) must stay a non-version — is_bad_version
+    # checks only _MARKER_RE, so it never sees "original mix".
+    r"\btrap\b", r"\bbass\b", r"\bedit\b",
     # Video-only uploads (clips with extra audio, lyric videos, rips)
     r"\bofficial video\b", r"\bofficial audio\b", r"\bmusic video\b",
     r"\blyric video\b", r"\blyrics?\b", r"\bклип\b", r"\bвидеоклип\b",
@@ -132,7 +140,20 @@ _NOISE_RE = [re.compile(p) for p in NOISE_PATTERNS]
 STRIP_ONLY_PATTERNS = [
     r"\boriginal mix\b",
 ]
-_STRIP_RE = _MARKER_RE + _NOISE_RE + [re.compile(p) for p in STRIP_ONLY_PATTERNS]
+# High-frequency bare genre words ("trap", "bass", "edit") are version
+# markers for is_bad_version ("Track (Trap Remix)" is not the track) but
+# must NOT take part in strip-equality checks: strip_markers("Trap
+# Queen") would leave "queen" and a plain "Queen" upload would pass
+# title_matches as the same track. Keep them only in _MARKER_RE.
+_STRIP_VERSION_MARKERS = tuple(
+    p for p in VERSION_MARKERS
+    if p not in (r"\btrap\b", r"\bbass\b", r"\bedit\b")
+)
+_STRIP_RE = (
+    [re.compile(p) for p in _STRIP_VERSION_MARKERS]
+    + _NOISE_RE
+    + [re.compile(p) for p in STRIP_ONLY_PATTERNS]
+)
 
 
 def _soft_norm(text: str) -> str:

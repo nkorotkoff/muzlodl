@@ -1,4 +1,4 @@
-"""Tests for sources (Jamendo + MusicBrainz + yt-dlp extras)."""
+"""Tests for sources (Jamendo + MusicBrainz + yt-dlp extras + sleymp3)."""
 import sys
 import tempfile
 import unittest
@@ -7,10 +7,11 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from loader.sources.base import score_match
+from loader.sources.base import score_match, TrackInfo
 from loader.sources.jamendo import JamendoSource
 from loader.sources.mp3party import MP3PartySource
 from loader.sources.musicbrainz import MusicBrainzEnricher
+from loader.sources.sleymp3 import Sleymp3Source
 from loader.sources.ytdlp_extras import DailymotionSource
 
 
@@ -157,6 +158,133 @@ class TestYTDLPExtras(unittest.TestCase):
     def test_dailymotion_prefix(self):
         self.assertEqual(DailymotionSource.search_prefix, "dailymotionsearch5:")
         self.assertEqual(DailymotionSource.name, "dailymotion")
+
+
+class TestSleymp3Source(unittest.TestCase):
+    """Search HTML shape observed live on sleymp3.ru/fsong (2026-09):
+    each result is an <li ... audio-data="0_<id>"> with .artist-name /
+    .song-name / .track-duration children."""
+
+    _HTML = (
+        '<li class="song-box-inline track" audio-data="0_44075306">'
+        '<div class="track-inner"><div class="fl-row-center">'
+        '<p class="inline-title">'
+        '<span title="ХЛЕБ - Вино" class="artist-name artist-label">'
+        '          ХЛЕБ'
+        '        </span><br>'
+        '<span class="song-name track-label">Вино</span>'
+        '</p>'
+        '<div class="fl-col"><span class="track-duration">03:01</span></div>'
+        '</div></div></li>'
+        '<li class="song-box-inline track" audio-data="0_80297466">'
+        '<div class="track-inner"><div class="fl-row-center">'
+        '<p class="inline-title">'
+        '<span class="artist-name artist-label">Хлеб</span><br>'
+        '<span class="song-name track-label">Вино &amp; Соль</span>'
+        '</p>'
+        '<div class="fl-col"><span class="track-duration">3:35</span></div>'
+        '</div></div></li>'
+    )
+
+    def setUp(self):
+        Sleymp3Source._breaker_fails = 0
+        Sleymp3Source._breaker_until = 0.0
+
+    def test_parse_results_bs4_path(self):
+        src = Sleymp3Source()
+        results = src._parse_results(self._HTML)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["audio_data"], "0_44075306")
+        self.assertEqual(results[0]["artist"], "ХЛЕБ")
+        self.assertEqual(results[0]["title"], "Вино")
+        self.assertEqual(results[0]["duration"], 181.0)
+        self.assertEqual(results[1]["title"], "Вино & Соль")  # entity decoded
+        self.assertEqual(results[1]["duration"], 215.0)
+
+    def test_parse_results_regex_fallback(self):
+        # Same page, but with the bs4 path returning nothing (broken
+        # markup) — the regex fallback must still recover the results.
+        src = Sleymp3Source()
+        with patch("loader.sources.sleymp3.BeautifulSoup") as bs4:
+            bs4.return_value.select.return_value = []
+            results = src._parse_results(self._HTML)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["audio_data"], "0_44075306")
+        self.assertEqual(results[0]["artist"], "ХЛЕБ")
+        self.assertEqual(results[0]["title"], "Вино")
+        self.assertEqual(results[0]["duration"], 181.0)
+
+    def test_search_iter_scores_and_carries_audio_data(self):
+        src = Sleymp3Source()
+        with patch.object(src, "_fetch_search", return_value=self._HTML):
+            results = list(src.search_iter("Хлеб", "Вино"))
+        self.assertTrue(results)
+        self.assertEqual(results[0].artist, "ХЛЕБ")
+        self.assertEqual(results[0].title, "Вино")
+        self.assertEqual(results[0].duration, 181.0)
+        self.assertEqual(results[0].match_score, 1.0)
+        self.assertEqual(results[0].extra["audio_data"], "0_44075306")
+        self.assertEqual(results[0].extra["raw_title"], "Вино")
+        # Down-ranked variant (title adds words) still yielded, after best
+        self.assertLess(results[1].match_score, results[0].match_score)
+
+    def test_link_from_payload(self):
+        link = Sleymp3Source._link_from_payload(
+            '{"link":"https://s210vla.storage.yandex.net/get-mp3/x/749",'
+            '"userId":null,"duration":246,"source":"ok","trackId":1}')
+        self.assertEqual(link, "https://s210vla.storage.yandex.net/get-mp3/x/749")
+        # &proxy= suffix is stripped like the site's JS does
+        link = Sleymp3Source._link_from_payload(
+            '{"link":"https://cdn/x.mp3&proxy=1.2.3.4","source":"ok"}')
+        self.assertEqual(link, "https://cdn/x.mp3")
+        # Scheme-relative host is upgraded
+        link = Sleymp3Source._link_from_payload(
+            '{"link":"//cdn.example/x.mp3","source":"localFile"}')
+        self.assertEqual(link, "https://cdn.example/x.mp3")
+        # Obfuscated payload: decode module is not shipped -> unusable
+        self.assertIsNone(Sleymp3Source._link_from_payload(
+            '{"link":"aGVsbG8=","source":"vkapi"}'))
+        # Garbage body -> None
+        self.assertIsNone(Sleymp3Source._link_from_payload("<html>oops</html>"))
+        self.assertIsNone(Sleymp3Source._link_from_payload(""))
+
+    def test_download_rejects_non_mp3(self):
+        src = Sleymp3Source()
+        src._resolve_url = lambda aid, info: "https://storage/x.mp3"
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        resp.iter_content.return_value = iter([b"<html>geo block</html>"])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "t.mp3"
+            with patch.object(src._session, "get", return_value=resp):
+                ok = src.download(TrackInfo(source="sleymp3", url="",
+                                            extra={"audio_data": "0_1"}), p)
+            self.assertFalse(ok)
+            self.assertFalse(p.exists())  # junk file removed
+            self.assertEqual(Sleymp3Source._breaker_fails, 1)
+
+    def test_download_accepts_real_mp3(self):
+        src = Sleymp3Source()
+        src._resolve_url = lambda aid, info: "https://storage/x.mp3"
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        resp.iter_content.return_value = iter([b"\xff\xfb\xe0\x44", b"\x00" * 64])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "t.mp3"
+            with patch.object(src._session, "get", return_value=resp):
+                ok = src.download(TrackInfo(source="sleymp3", url="",
+                                            extra={"audio_data": "0_1"}), p)
+            self.assertTrue(ok)
+            self.assertTrue(p.exists() and p.stat().st_size > 0)
+            self.assertEqual(Sleymp3Source._breaker_fails, 0)
+
+    def test_duration_to_secs(self):
+        from loader.sources.sleymp3 import _duration_to_secs
+        self.assertEqual(_duration_to_secs("03:01"), 181.0)
+        self.assertEqual(_duration_to_secs("3:35"), 215.0)
+        self.assertEqual(_duration_to_secs("1:02:03"), 3723.0)
+        self.assertEqual(_duration_to_secs(""), 0.0)
+        self.assertEqual(_duration_to_secs("--:--"), 0.0)
 
 
 if __name__ == "__main__":

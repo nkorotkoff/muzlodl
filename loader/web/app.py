@@ -7,10 +7,10 @@ import threading
 from pathlib import Path
 
 import flask
-from flask import Flask, jsonify, render_template, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory, session
 
 from . import auth, db, security
-from .core import LIBRARY, STATIC, TEMPLATES, _download_jobs, _jobs_lock, auto_import_log, auto_scan
+from .core import LIBRARY, STATIC, STATIC_DIST, _download_jobs, _jobs_lock, auto_import_log, auto_scan
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _load_secret_key() -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder=str(STATIC), template_folder=str(TEMPLATES))
+    app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
     app.secret_key = _load_secret_key()
 
     # Session cookie hardening: HttpOnly (default), SameSite=Lax so the
@@ -63,7 +63,7 @@ def create_app() -> Flask:
 
     @app.before_request
     def _check_auth():
-        if request.path.startswith("/static/"):
+        if request.path.startswith("/static/") or request.path.startswith("/assets/"):
             return None
         # CSRF: every state-changing request must carry a token matching
         # the csrf_token cookie (double-submit). Login/setup are included —
@@ -146,26 +146,24 @@ def create_app() -> Flask:
         session.pop("authed", None)
         return jsonify({"ok": True})
 
-    # ---- App pages (Jinja layout) ----
+    # ---- App pages ---- Svelte SPA (hash router) ----
     @app.route("/")
-    def index():
-        return render_template("index.html", active="library")
-
     @app.route("/search")
-    def search_page():
-        return render_template("search.html", active="search")
-
     @app.route("/import")
-    def import_page():
-        return render_template("import.html", active="import")
-
     @app.route("/settings")
-    def settings_page():
-        return render_template("settings.html", active="settings")
-
     @app.route("/stats")
-    def stats_page():
-        return render_template("stats.html", active="stats")
+    def spa_index():
+        # dist/index.html expects hash router (#/import); direct /import also serves SPA
+        return send_from_directory(str(STATIC_DIST), "index.html")
+
+    @app.route("/app")
+    @app.route("/app/<path:path>")
+    def spa_app(path=""):
+        return send_from_directory(str(STATIC_DIST), "index.html")
+
+    @app.route("/assets/<path:path>")
+    def spa_assets(path):
+        return send_from_directory(str(STATIC_DIST / "assets"), path)
 
     # ---- Blueprints ----
     from .routes_library import bp as library_bp

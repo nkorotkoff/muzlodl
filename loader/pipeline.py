@@ -582,7 +582,8 @@ class Pipeline:
     #: Without an expected duration (enricher silent / rate-limited) a
     #: file longer than this is very likely an album or compilation
     #: ("МУККА - Весна" 32min, "TOTO - Africa" 15min) rather than the
-    #: track. With an expected duration the 0.7/1.3 ratio check handles it.
+    #: track. With an expected duration the 0.92/1.08 ratio check
+    #: handles it.
     MAX_ACCEPTABLE_DURATION = 600.0
 
     def _check_duration(self, path: Path, expected_seconds) -> bool:
@@ -593,17 +594,18 @@ class Pipeline:
            as a "track" has no duration — reject, don't accept blindly).
         2. A hard floor: anything shorter than 60s is a preview/clip.
         3. If we have an expected duration (from iTunes/MusicBrainz) and
-           the file is >1.05x or <0.95x that length, it's almost certainly a
-           different recording (full album, short preview, live medley, or
-           fan-edit). Without an expected duration, a hard ceiling of
-           10 minutes catches albums/compilations.
+           the file is >1.08x or <0.92x that length (±8%), it's almost
+           certainly a different recording (full album, short preview,
+           live medley, or fan-edit). Without an expected duration, a hard
+           ceiling of 10 minutes catches albums/compilations.
 
-        The 0.95/1.05 band is tight: fake uploads often carry the right
+        The 0.92/1.08 band (±8%): fake uploads often carry the right
         title AND a plausible length but are a different recording
         (lightaudio "Para-dox - Последнее слово" came in at 255s vs the
         real 214s = ratio 1.19, inside the old 0.7/1.3 band). Studio
-        versions of the same track differ by <2%; live cuts are rejected
-        anyway.
+        versions of the same track differ by <2%; the extra margin
+        absorbs VBR/stream length-estimation drift. Live cuts are
+        rejected anyway by the version gate.
         """
         actual = self._get_duration(path)
         if not actual:
@@ -620,7 +622,7 @@ class Pipeline:
                 return False
             return True
         ratio = actual / expected_seconds
-        if ratio > 1.05 or ratio < 0.95:
+        if ratio > 1.08 or ratio < 0.92:
             log.info("    duration: %ds actual vs %ds expected (ratio %.2fx, rejected)",
                      int(actual), int(expected_seconds), ratio)
             return False

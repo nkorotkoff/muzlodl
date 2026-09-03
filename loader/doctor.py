@@ -70,69 +70,22 @@ def test_archiveorg() -> SourceHealth:
     return h
 
 
-def test_openverse() -> SourceHealth:
-    h = SourceHealth(name="openverse")
-    code, ms, err = _timed("https://api.openverse.org/v1/audio/?q=test&page_size=1")
-    h.latency_ms = ms
-    if code == 200:
-        h.available = True
-        h.can_search = True
-        # Test download CDN (upload.wikimedia.org is the most common failure)
-        code2, ms2, err2 = _timed("https://upload.wikimedia.org/")
-        h.can_download = code2 in (200, 301, 302, 404)
-        if not h.can_download:
-            h.reason = f"upload.wikimedia.org {code2} {err2[:60]}"
-    else:
-        h.reason = f"api.openverse.org HTTP {code} {err}"
-    return h
-
-
-def test_wikicommons() -> SourceHealth:
-    h = SourceHealth(name="wikicommons")
-    code, ms, err = _timed(
-        "https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=test&srnamespace=6&format=json"
-    )
-    h.latency_ms = ms
-    if code == 200:
-        h.available = True
-        h.can_search = True
-        # Same upload.wikimedia.org for downloads
-        code2, _, err2 = _timed("https://upload.wikimedia.org/")
-        h.can_download = code2 in (200, 301, 302, 404)
-        if not h.can_download:
-            h.reason = f"upload.wikimedia.org {code2}"
-    else:
-        h.reason = f"commons API HTTP {code} {err}"
-    return h
-
-
-def test_audius() -> SourceHealth:
-    h = SourceHealth(name="audius")
-    code, ms, err = _timed("https://audius.co/v1/health", timeout=5)
-    h.latency_ms = ms
-    if code in (200, 204):
-        h.available = True
-        h.can_search = True
-        # stream endpoint
-        code2, _, _ = _timed("https://audius.co/v1/tracks/search?query=test", timeout=5)
-        h.can_download = code2 == 200
-        if not h.can_download:
-            h.reason = f"search returned {code2}"
-    else:
-        h.reason = f"health HTTP {code} {err}"
-    return h
-
-
-def test_yandex() -> SourceHealth:
+def test_yandex(config) -> SourceHealth:
     h = SourceHealth(name="yandex")
+    if not config.yandex_token:
+        # Anonymous yandex only serves 30s previews — useless for full
+        # tracks (the pipeline's 60s floor would reject every download).
+        # Keep it OUT of the recommended chain until a token is set,
+        # same policy as jamendo without a client_id.
+        h.reason = "YANDEX_TOKEN not set (anonymous: 30s previews only)"
+        return h
     code, ms, err = _timed("https://music.yandex.ru/", timeout=5)
     h.latency_ms = ms
     if code in (200, 302):
         h.available = True
-        # Without token, only preview works
         h.can_search = True
-        h.can_download = True  # previews at least
-        h.extras["note"] = "anonymous: 30s previews only"
+        h.can_download = True  # full tracks with token + subscription
+        h.extras["note"] = "token set: full tracks (requires subscription)"
     else:
         h.reason = f"music.yandex.ru HTTP {code} {err}"
     return h
@@ -180,10 +133,6 @@ def test_soundcloud() -> SourceHealth:
 
 def test_bandcamp() -> SourceHealth:
     return test_ytdlp_site("bandcamp", "https://bandcamp.com/")
-
-
-def test_bilibili() -> SourceHealth:
-    return test_ytdlp_site("bilibili", "https://www.bilibili.com/")
 
 
 def test_dailymotion() -> SourceHealth:
@@ -236,22 +185,44 @@ def test_mp3party() -> SourceHealth:
     return h
 
 
-# Map name -> test function (some need config)
+def test_sleymp3() -> SourceHealth:
+    h = SourceHealth(name="sleymp3")
+    # /fsong is the server-rendered search page; audio-data="<id>" attrs
+    # are what the AJAX resolver (/vkparser) needs to hand out MP3 urls.
+    # Their presence means both search and download paths are live.
+    code, ms, err = _timed("https://sleymp3.ru/fsong?q=test")
+    h.latency_ms = ms
+    if code == 200:
+        h.available = True
+        h.can_search = True
+        h.can_download = True
+        h.extras["note"] = "AJAX-resolved MP3 links, Russian/CIS music"
+    else:
+        h.reason = f"HTTP {code} {err}"
+    return h
+
+
+# Map name -> test function (some need config).
+# Removed along with their registry builders (always fail, code deleted):
+#   audius    — JSON parse errors, hosts down
+#   openverse — 0 results, dead project
+#   wikicommons — HTTP 403 since 2024
+#   bilibili  — HTTP 412 Precondition Failed
+# Doctor and the recommended chain must never list sources that
+# `sources/registry.py` cannot build (the old state file recommended a
+# 10-source chain of which 4 were dead — a doctor/registry desync).
 TEST_FUNCTIONS = {
     "archiveorg": test_archiveorg,
-    "openverse": test_openverse,
-    "wikicommons": test_wikicommons,
-    "audius": test_audius,
     "yandex": test_yandex,
     "jamendo": test_jamendo,
     "youtube": test_youtube,
     "soundcloud": test_soundcloud,
     "bandcamp": test_bandcamp,
-    "bilibili": test_bilibili,
     "dailymotion": test_dailymotion,
     "itunes": test_itunes,
     "lightaudio": test_lightaudio,
     "mp3party": test_mp3party,
+    "sleymp3": test_sleymp3,
 }
 
 
@@ -264,7 +235,7 @@ def run_doctor(config, only: Optional[List[str]] = None) -> Dict[str, SourceHeal
         if not fn:
             continue
         try:
-            if name in ("jamendo",):
+            if name in ("jamendo", "yandex"):
                 h = fn(config)
             else:
                 h = fn()
@@ -286,11 +257,14 @@ def pick_default_chain(results: Dict[str, SourceHealth]) -> List[str]:
     # Within each, prefer by historical reliability
     # Jamendo is a CC-only catalogue, so keep it after the general sources
     # to avoid false-positive matches on popular commercial tracks.
+    # Only sources that still exist in sources/registry.py are listed —
+    # a dead source here would get recommended despite having no builder.
     prefer_order = [
-        "archiveorg", "openverse", "wikicommons",
-        "yandex", "audius",
-        "youtube", "soundcloud", "bandcamp", "bilibili", "dailymotion",
+        "archiveorg",
+        "yandex",
+        "youtube", "soundcloud", "bandcamp", "dailymotion",
         "jamendo",
+        "sleymp3",
     ]
 
     def sort_key(name: str) -> int:

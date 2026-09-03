@@ -1,5 +1,4 @@
-(function() {
-var LANG_KEY = 'lang';
+import { writable, derived } from 'svelte/store';
 var DICT = {
 en: {
 'nav.import': 'Import',
@@ -86,6 +85,15 @@ en: {
 'import.downloadAddFirst': 'Add tracks first',
 'import.progress': 'Progress',
 'import.trackStatus': 'Track status',
+'import.queue': 'Queue',
+'import.dropTitle': 'Drop a file here or paste a list',
+'import.dropHint': 'CSV / JSON / TXT — or paste lines like Artist - Title. Click to choose file.',
+'import.bulkLabel': 'Paste a list — one track per line',
+'import.bulkPlaceholder': 'MiyaGi & Andy Panda - Там ревели горы\nBon Jovi — Livin\' On A Prayer',
+'import.parse': '＋ Add to queue',
+'import.clearQueue': 'Clear queue',
+'import.advanced': 'Advanced',
+'import.bulkHint': 'Each line: Artist - Title. Album detected from metadata.',
 'import.trackList': 'Track list ({n})',
 'import.noArtistWarn': '{n} without artist',
 'import.noArtist': '⚠ no artist',
@@ -291,6 +299,15 @@ ru: {
 'import.downloadAddFirst': 'Сначала добавьте треки',
 'import.progress': 'Прогресс',
 'import.trackStatus': 'Статус треков',
+'import.queue': 'Очередь',
+'import.dropTitle': 'Перетащи файл сюда или вставь список',
+'import.dropHint': 'CSV / JSON / TXT — или строки вида Артист - Название. Клик — выбрать файл.',
+'import.bulkLabel': 'Вставь список — по одному треку на строку',
+'import.bulkPlaceholder': 'MiyaGi & Andy Panda - Там ревели горы\nBon Jovi — Livin\' On A Prayer',
+'import.parse': '＋ В очередь',
+'import.clearQueue': 'Очистить очередь',
+'import.advanced': 'Дополнительно',
+'import.bulkHint': 'Каждая строка: Артист - Название. Альбом — из метаданных.',
 'import.trackList': 'Список треков ({n})',
 'import.noArtistWarn': '{n} без артиста',
 'import.noArtist': '⚠ нет артиста',
@@ -412,6 +429,8 @@ ru: {
 'setup.submit': 'Создать админа',
 }
 };
+
+
 function getLang() {
 try {
 var v = localStorage.getItem(LANG_KEY);
@@ -468,4 +487,11 @@ window.t = t;
 window.applyI18n = applyI18n;
 document.addEventListener('DOMContentLoaded', applyI18n);
 if (document.readyState !== 'loading') applyI18n();
-})();
+
+
+export { DICT, getLang, setLang, t, applyI18n };
+
+export const langStore = writable(getLang());
+export const tStore = derived(langStore, ($l) => (key, params) => t(key, params));
+const _origSetLang = setLang;
+export function setLangStore(lang) { _origSetLang(lang); try { langStore.set(getLang()); } catch(e){} }

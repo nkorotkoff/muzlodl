@@ -12,6 +12,7 @@ from .jamendo import JamendoSource
 from .archiveorg import ArchiveOrgSource
 from .lightaudio import LightAudioSource
 from .mp3party import MP3PartySource
+from .sleymp3 import Sleymp3Source
 from .zaycev import ZaycevSource
 from .musicbrainz import MusicBrainzEnricher
 from .itunes import ITunesEnricher, ITunesPreviewSource
@@ -35,6 +36,7 @@ def default_sources(config, enabled: List[str] = None) -> List[Source]:
         "dailymotion": lambda: DailymotionSource(),
         "lightaudio": lambda: LightAudioSource(),
         "mp3party": lambda: MP3PartySource(),
+        "sleymp3": lambda: Sleymp3Source(),
         "zaycev": lambda: ZaycevSource(),
         "itunes_preview": lambda: ITunesPreviewSource(),
     }

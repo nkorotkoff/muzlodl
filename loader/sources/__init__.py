@@ -7,6 +7,7 @@ from .jamendo import JamendoSource
 from .archiveorg import ArchiveOrgSource
 from .lightaudio import LightAudioSource
 from .mp3party import MP3PartySource
+from .sleymp3 import Sleymp3Source
 from .itunes import ITunesEnricher, ITunesPreviewSource
 from .musicbrainz import MusicBrainzEnricher
 from .registry import default_sources, default_enrichers
@@ -23,6 +24,7 @@ __all__ = [
     "ArchiveOrgSource",
     "LightAudioSource",
     "MP3PartySource",
+    "Sleymp3Source",
     "ITunesEnricher",
     "ITunesPreviewSource",
     "MusicBrainzEnricher",

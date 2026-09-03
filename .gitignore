@@ -58,6 +58,11 @@ Thumbs.db
 *.bak
 *.swp
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+loader/web/static/dist/
+
 # PyInstaller leftovers
 *.manifest
 *.spec.cache
