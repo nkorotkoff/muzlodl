@@ -1,6 +1,6 @@
 <script>
   import Router from 'svelte-spa-router';
-  import { getLang, setLang, t } from './lib/i18n.js';
+  import { getLang, t, langStore, setLangStore } from './lib/i18n.js';
   import Library from './routes/Library.svelte';
   import ImportView from './routes/Import.svelte';
   import Search from './routes/Search.svelte';
@@ -10,6 +10,7 @@
   import Setup from './routes/Setup.svelte';
   import { api } from './lib/api.js';
   import Player from './components/Player.svelte';
+  import { currentId } from './lib/player.js';
   import { onMount } from 'svelte';
   // hash-based active (loc not exported in this version)
 
@@ -24,7 +25,8 @@
   };
 
   let lang = getLang();
-  function switchLang(l) { setLang(l); lang = getLang(); }
+  $: lang = $langStore;
+  function switchLang(l) { setLangStore(l); }
 
   let jobs = [];
   let running = 0;
@@ -91,6 +93,8 @@
   </div>
 </nav>
 
-<Router {routes} />
+<div class:has-player={$currentId}>
+  <Router {routes} />
+</div>
 <Player />
 <div id="toast" style="display:none"></div>

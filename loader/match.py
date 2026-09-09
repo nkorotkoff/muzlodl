@@ -70,8 +70,20 @@ VERSION_MARKERS = [
     # STRIP_ONLY_PATTERNS) must stay a non-version.
     r"\brmx\b", r"\brework\b", r"\bremake\b", r"\bflip\b", r"\bvip\b",
     r"\bextended(?:\s*mix)?\b", r"\bclub(?:\s*mix)?\b", r"\bversion\b",
-    r"\bверсия\b", r"\bphonk\b", r"\bhyper\b", r"\bhyper[\s\-_]?phonk\b",
-    r"\bdrift\b", r"\bhouse\b", r"\btrance\b",
+    r"\bминусовка\b", r"\bминусова\w*\b", r"\bверсия\b", r"\bphonk\b", r"\bhyper\b", r"\bhyper[\s\-_]?phonk\b",
+    r"\bdrift\b", r"\bhouse\b", r"\btrance\b", r"\bинструментал\w*\b", r"-вокал\b",
+    r"\bкараоке\s*минус\b",
+    # Derivative full-version releases: same song, different recording —
+    # unplugged sessions, reverb/slowed TikTok-style variants, named-version
+    # mixes ("Имя (Версия)" / DJ-name compounds), fan "original" reuploads,
+    # and RU slowed/reverb spellings.
+    r"\bunplugged\b", r"\bacapella\b", r"\ba\scapella\b",
+    r"\bacappella\b", r"\bpsychoacoustic\b", r"\bпсихоакустика\b",
+    r"\breverb\b", r"\bреверб\b", r"\bзамедлен\w*\b", r"\bускорен\w*\b",
+    r"\btiktok\b", r"\bтикток\b",
+    r"\btv\s*version\b", r"\bradio\s*version\b", r"\bдругая\s*версия\b",
+    r"\bduet\s*version\b", r"\bдуэт\b",
+    r"\b\d{1,2}x\s*speed\b", r"\bspeed\s*\d{1,2}x\b",
     # Trap/bass genre retags ("Track (Trap Remix)", "(Bass Boosted)" —
     # subsumes "\bbass boosted\b" above) and upload edits ("Trap Edit").
     # The bare "\bedit\b" subsumes "radio edit"/"remix edit"/"edit
@@ -79,6 +91,10 @@ VERSION_MARKERS = [
     # (STRIP_ONLY_PATTERNS) must stay a non-version — is_bad_version
     # checks only _MARKER_RE, so it never sees "original mix".
     r"\btrap\b", r"\bbass\b", r"\bedit\b",
+    # Non-song album parts: intros/outros/skits/interludes are different
+    # recordings, not the track ("TOKYO (Интро)" is not "TOKYO").
+    r"\bintro\b", r"\boutro\b", r"\bskit\b", r"\binterlude\b",
+    r"\bинтро\b", r"\bаутро\b", r"\bинтерлюдия\b", r"\bскит\b",
     # Video-only uploads (clips with extra audio, lyric videos, rips)
     r"\bofficial video\b", r"\bofficial audio\b", r"\bmusic video\b",
     r"\blyric video\b", r"\blyrics?\b", r"\bклип\b", r"\bвидеоклип\b",
@@ -145,9 +161,12 @@ STRIP_ONLY_PATTERNS = [
 # must NOT take part in strip-equality checks: strip_markers("Trap
 # Queen") would leave "queen" and a plain "Queen" upload would pass
 # title_matches as the same track. Keep them only in _MARKER_RE.
+# Same for bare "\breverb\b" ("Young & Beautiful (Reverb)") — keep only
+# in _MARKER_RE so band names containing the stem ("Reverb Syntax")
+# aren't stripped to nothing.
 _STRIP_VERSION_MARKERS = tuple(
     p for p in VERSION_MARKERS
-    if p not in (r"\btrap\b", r"\bbass\b", r"\bedit\b")
+    if p not in (r"\btrap\b", r"\bbass\b", r"\bedit\b", r"\breverb\b")
 )
 _STRIP_RE = (
     [re.compile(p) for p in _STRIP_VERSION_MARKERS]
@@ -351,6 +370,7 @@ def candidate_ok(
     if is_bad_version(cand_v, want_title):
         return False
     if want_artist and cand_artist:
+        import re as _re
         wa = _norm(want_artist)
         ca = _norm(cand_artist)
         # Artist matches if exactly equal, or listed among collaborators
@@ -359,5 +379,22 @@ def candidate_ok(
         # Split the RAW string — _norm would flatten the commas away.
         listed = {_norm(p.strip()) for p in cand_artist.split(",") if p.strip()}
         if wa != ca and wa not in listed:
-            return False
+            # Collaborator uploads: the uploader lists only a subset of the
+            # requested artists ("влад пиво,KENTUKKI" for a 3-artist request
+            # "влад пиво, KENTUKKI & Merryattack"). Accept when EVERY
+            # candidate token is present in the request AND the request has
+            # strictly MORE tokens (a strict subset of collaborators).
+            # The strictness matters: same-set or disjoint artists stay
+            # rejected, and the Сироткин rule ("Римас (Сироткин)" vs
+            # "Сироткин") still fails since "римас" ∉ {сироткин}.
+            want_tokens = set(_re.split(r"[\s,&+]+", wa)) - {""}
+            cand_tokens = set(_re.split(r"[\s,&+]+", ca)) - {""}
+            if not (cand_tokens and cand_tokens < want_tokens):
+                return False
+            # "(prod. X)" is an uploader/producer tag, not a collaborator:
+            # the RAW candidate artist must not carry it, else "KENTUKKI
+            # (prod.HVRD BLVST)" sneaks past as a subset of the request
+            # (its _norm form is just "kentukki" since parens are dropped).
+            if _re.search(r"\bprod\b", _soft_norm(cand_artist)):
+                return False
     return True

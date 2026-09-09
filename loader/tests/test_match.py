@@ -58,9 +58,39 @@ class TestBadVersion(unittest.TestCase):
         self.assertTrue(is_bad_version("Track Sped-Up", "Track"))
         self.assertTrue(is_bad_version("Track spedup", "Track"))
 
+    def test_intro_outro_skit_markers(self):
+        # Album-part markers are non-canonical ("TOKYO (Интро)" != "TOKYO").
+        for t in ["TOKYO (Интро)", "TOKYO (Intro)", "TOKYO (Outro)",
+                  "TOKYO (Interlude)", "TOKYO (Skit)", "TOKYO (Аутро)"]:
+            self.assertTrue(is_bad_version(t, "TOKYO"), t)
+        # Plain TOKYO still passes.
+        self.assertFalse(is_bad_version("TOKYO", "TOKYO"))
+        # Candidate gate rejects the intro variant.
+        self.assertFalse(candidate_ok("SQWOZ BAB", "TOKYO",
+                                      "SQWOZ BAB - TOKYO (Интро)", "SQWOZ BAB"))
+        self.assertTrue(candidate_ok("SQWOZ BAB", "TOKYO",
+                                     "SQWOZ BAB - TOKYO", "SQWOZ BAB"))
+
     def test_original_mix_not_a_version(self):
         # "Original Mix" is the canonical version, not a remix upload.
         self.assertFalse(is_bad_version("Вино (Original Mix)", "Вино"))
+
+    def test_derivative_full_versions(self):
+        # Unplugged / a-capella / reverb / TikTok / 2x / TV / RU-slowed —
+        # all different recordings from the plain track.
+        for t in ["Track (Unplugged)", "Track (A Capella)", "Track (Acapella)",
+                  "Track (Slowed + Reverb)", "Track (Reverb)",
+                  "Track (TikTok Version)", "Track (2x Speed)",
+                  "Track (TV Version)", "Track (Radio Version)",
+                  "Track (Duet Version)", "Track (Замедленная)",
+                  "Track (Ускоренная)", "Track (Тикток Версия)",
+                  "Track (Другая версия)", "Track (Psychoacoustic Version)",
+                  "Track (Психоакустика)"]:
+            self.assertTrue(is_bad_version(t, "Track"), t)
+            self.assertFalse(candidate_ok("A", "Track", t, "A"), t)
+        # Fan "original" reuploads stay legal: the residue pass is for
+        # melody-seekers, duration/acoustid still apply.
+        self.assertFalse(is_bad_version("Track (Оригинал)", "Track"))
 
 
 class TestCandidateOk(unittest.TestCase):
@@ -130,6 +160,21 @@ class TestCandidateOk(unittest.TestCase):
         self.assertFalse(candidate_ok("Fetty Wap", "Trap Queen", "Queen", "Fetty Wap"))
         self.assertFalse(title_matches("Trap Queen", "Queen"))
         self.assertFalse(candidate_ok("Nicki Minaj", "Super Bass", "Super", "Nicki Minaj"))
+
+    def test_collaborator_subset_accepted(self):
+        # Collaborator upload lists a strict subset of the requested
+        # artists ("влад пиво,KENTUKKI" for a 3-artist request).
+        self.assertTrue(candidate_ok("влад пиво, KENTUKKI & Merryattack", "Замигает свет",
+                                     "влад пиво,KENTUKKI – Замигает свет", "влад пиво,KENTUKKI"))
+        self.assertTrue(candidate_ok("влад пиво, KENTUKKI & Merryattack", "Замигает свет",
+                                     "KENTUKKI – Замигает свет", "KENTUKKI"))
+
+    def test_prod_tag_not_a_collaborator(self):
+        # "(prod. X)" is an uploader tag, not a collaborator — must stay
+        # rejected even though the bare name is a subset.
+        self.assertFalse(candidate_ok("влад пиво, KENTUKKI & Merryattack", "Замигает свет",
+                                      "KENTUKKI (prod.HVRD BLVST) – Замигает свет",
+                                      "KENTUKKI (prod.HVRD BLVST)"))
 
 
 if __name__ == "__main__":

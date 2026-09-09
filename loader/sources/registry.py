@@ -7,8 +7,6 @@ from typing import List
 from .base import Source
 from .ytdlp_based import YouTubeSource, BandcampSource, SoundCloudSource
 from .ytdlp_extras import DailymotionSource
-from .yandex import YandexMusicSource
-from .jamendo import JamendoSource
 from .archiveorg import ArchiveOrgSource
 from .lightaudio import LightAudioSource
 from .mp3party import MP3PartySource
@@ -26,10 +24,7 @@ def default_sources(config, enabled: List[str] = None) -> List[Source]:
     enabled_set = set(s.lower() for s in enabled)
 
     builders = {
-        "yandex": lambda: YandexMusicSource(config.yandex_token),
         "archiveorg": lambda: ArchiveOrgSource(),
-        "jamendo": lambda: JamendoSource(config.jamendo_client_id)
-        if config.jamendo_client_id else None,
         "bandcamp": lambda: BandcampSource(cookies_file=config.yt_cookies),
         "soundcloud": lambda: SoundCloudSource(cookies_file=config.yt_cookies),
         "youtube": lambda: YouTubeSource(cookies_file=config.yt_cookies),

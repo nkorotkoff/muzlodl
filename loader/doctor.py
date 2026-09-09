@@ -70,45 +70,6 @@ def test_archiveorg() -> SourceHealth:
     return h
 
 
-def test_yandex(config) -> SourceHealth:
-    h = SourceHealth(name="yandex")
-    if not config.yandex_token:
-        # Anonymous yandex only serves 30s previews — useless for full
-        # tracks (the pipeline's 60s floor would reject every download).
-        # Keep it OUT of the recommended chain until a token is set,
-        # same policy as jamendo without a client_id.
-        h.reason = "YANDEX_TOKEN not set (anonymous: 30s previews only)"
-        return h
-    code, ms, err = _timed("https://music.yandex.ru/", timeout=5)
-    h.latency_ms = ms
-    if code in (200, 302):
-        h.available = True
-        h.can_search = True
-        h.can_download = True  # full tracks with token + subscription
-        h.extras["note"] = "token set: full tracks (requires subscription)"
-    else:
-        h.reason = f"music.yandex.ru HTTP {code} {err}"
-    return h
-
-
-def test_jamendo(config) -> SourceHealth:
-    h = SourceHealth(name="jamendo")
-    if not config.jamendo_client_id:
-        h.reason = "JAMENDO_CLIENT_ID not set (free key at developer.jamendo.com)"
-        return h
-    code, ms, err = _timed(
-        f"https://api.jamendo.com/v3.0/tracks/?client_id={config.jamendo_client_id}&format=json&limit=1"
-    )
-    h.latency_ms = ms
-    if code == 200:
-        h.available = True
-        h.can_search = True
-        h.can_download = True
-    else:
-        h.reason = f"api HTTP {code} {err}"
-    return h
-
-
 def test_ytdlp_site(name: str, base_url: str) -> SourceHealth:
     """Test a yt-dlp based source by checking its main page."""
     h = SourceHealth(name=name)
@@ -213,8 +174,6 @@ def test_sleymp3() -> SourceHealth:
 # 10-source chain of which 4 were dead — a doctor/registry desync).
 TEST_FUNCTIONS = {
     "archiveorg": test_archiveorg,
-    "yandex": test_yandex,
-    "jamendo": test_jamendo,
     "youtube": test_youtube,
     "soundcloud": test_soundcloud,
     "bandcamp": test_bandcamp,
@@ -235,10 +194,7 @@ def run_doctor(config, only: Optional[List[str]] = None) -> Dict[str, SourceHeal
         if not fn:
             continue
         try:
-            if name in ("jamendo", "yandex"):
-                h = fn(config)
-            else:
-                h = fn()
+            h = fn()
         except Exception as e:
             h = SourceHealth(name=name, reason=f"test crashed: {e}")
         results[name] = h
@@ -254,16 +210,12 @@ def pick_default_chain(results: Dict[str, SourceHealth]) -> List[str]:
     full = [n for n, h in results.items() if h.can_download and h.can_search]
     search_only = [n for n, h in results.items() if h.can_search and not h.can_download]
 
-    # Within each, prefer by historical reliability
-    # Jamendo is a CC-only catalogue, so keep it after the general sources
-    # to avoid false-positive matches on popular commercial tracks.
+    # Within each, prefer by historical reliability.
     # Only sources that still exist in sources/registry.py are listed —
     # a dead source here would get recommended despite having no builder.
     prefer_order = [
         "archiveorg",
-        "yandex",
         "youtube", "soundcloud", "bandcamp", "dailymotion",
-        "jamendo",
         "sleymp3",
     ]
 

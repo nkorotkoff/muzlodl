@@ -1,6 +1,7 @@
 <script>
 
-  import { t } from '../lib/i18n.js';
+  import { t, langStore, setLangStore } from '../lib/i18n.js';
+  $: _lang = $langStore;
   import { api } from '../lib/api.js';
   import { onMount } from 'svelte';
   let tab='general'; let saveText=''; let saveTimer=null;
@@ -69,7 +70,7 @@
     <div class="settings-panels">
       {#if tab==='general'}
         <section class="settings-panel"><div class="card"><h3>{t('settings.language')}</h3>
-          <select value={localStorage.getItem('lang')||'en'} on:change={(e)=>{ localStorage.setItem('lang', e.target.value); location.reload(); }}><option value="en">English</option><option value="ru">Русский</option></select>
+          <select value={localStorage.getItem('lang')||'en'} on:change={(e)=>{ setLangStore(e.target.value); }}><option value="en">English</option><option value="ru">Русский</option></select>
         </div></section>
       {:else if tab==='sources'}
         <section class="settings-panel"><div class="card"><h3>{t('settings.sources')}</h3>

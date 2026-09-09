@@ -6,6 +6,7 @@ import logging
 import tempfile
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import flask
@@ -55,18 +56,23 @@ def api_search():
 
     sources = default_sources(cfg)
     results = []
-    sources_searched = 0
 
-    for src in sources:
+    def _search_one(src):
+        out = []
         try:
             count = 0
             for info in src.search_iter(artist, title, album):
-                if count >= 3:  # max 3 per source
+                if count >= 3:
                     break
                 score = info.match_score or 0.0
                 if score < 0.3:
                     continue
-                results.append({
+                # sleymp3 keeps its playable URL in extra.audio_data and
+                # needs a server-side vkparser resolve for preview/play.
+                # raw_* in extra are the site's canonical names (without
+                # score heuristics truncation).
+                extra = getattr(info, "extra", None) or {}
+                out.append({
                     "artist": info.artist or artist,
                     "title": info.title or title,
                     "album": info.album or album,
@@ -75,14 +81,24 @@ def api_search():
                     "duration": info.duration,
                     "year": info.year,
                     "url": info.url or "",
+                    "audio_data": extra.get("audio_data") or "",
+                    "raw_title": extra.get("raw_title") or info.title or "",
+                    "raw_artist": extra.get("raw_artist") or info.artist or "",
                 })
                 count += 1
-            sources_searched += 1
         except Exception as e:
             log.debug("search error on %s: %s", src.name, e)
-            continue
+        return out
 
-    # Sort by score descending
+    # Parallelize across 7 sources: was sequential ~8s (youtube 1.2s +
+    # soundcloud 2.6s + mp3party 1.1s + archiveorg 2.8s), now bounded by
+    # the slowest one (~2.5s).
+    with ThreadPoolExecutor(max_workers=len(sources) or 1) as pool:
+        futs = {pool.submit(_search_one, s): s for s in sources}
+        for f in as_completed(futs):
+            results.extend(f.result())
+    sources_searched = len(sources)
+
     results.sort(key=lambda r: r.get("match_score", 0), reverse=True)
 
     return jsonify({
@@ -98,7 +114,21 @@ def api_preview_start():
     Returns {"job_id": "...", "stream_url": "/api/preview/.../stream"}.
     """
     data = request.get_json() or {}
-    url = data.get("url", "")
+    url = data.get("url", "") or ""
+    audio_data = (data.get("audio_data") or "").strip()
+    raw_title = (data.get("raw_title") or "").strip()
+    raw_artist = (data.get("raw_artist") or "").strip()
+    # sleymp3 search rows have url="" until vkparser resolves the id
+    if not url and audio_data:
+        try:
+            from ..sources.sleymp3 import Sleymp3Source
+            from ..sources.base import TrackInfo as _TI
+            _src = Sleymp3Source()
+            _ti = _TI(source="sleymp3", url="", artist=raw_artist, title=raw_title,
+                      album="", extra={"audio_data": audio_data, "raw_title": raw_title, "raw_artist": raw_artist})
+            url = _src._resolve_url(audio_data, _ti) or ""
+        except Exception as e:
+            log.debug("[preview] sleymp3 resolve %s: %s", audio_data, e)
     if not url:
         return jsonify({"error": "url required"}), 400
 
@@ -117,21 +147,35 @@ def api_preview_start():
 
     def _download():
         try:
-            from ..sources.ytdlp_based import YouTubeSource
-            from ..sources.base import TrackInfo
-            from ..config import Config
-
-            cfg = Config.from_env()
-            src = YouTubeSource(cfg.quality)
-            info = TrackInfo(
-                source="youtube", url=url,
-                artist="", title="", album="",
+            actual = Path(tmp_path)
+            # Direct MP3/opus links (sleymp3, mp3party, lightaudio, …) are
+            # already playable — just fetch them with requests. yt-dlp is
+            # only needed for youtube/soundcloud/etc.
+            is_direct = url.startswith("http") and any(
+                k in url.lower() for k in (".mp3", ".opus", ".m4a", ".ogg", "storage.yandex.net", "dl2.mp3party", "get-mp3")
             )
-            ok = src.download(info, Path(tmp_path))
-            if not ok or not Path(tmp_path).exists() or Path(tmp_path).stat().st_size == 0:
+            ok = False
+            if is_direct:
+                import requests as _rq
+                h = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0.0.0"}
+                with _rq.get(url, stream=True, timeout=30, headers=h) as r:
+                    r.raise_for_status()
+                    actual.write_bytes(b"")  # ensure exists
+                    with open(actual, "wb") as f:
+                        for chunk in r.iter_content(8192):
+                            f.write(chunk)
+                ok = actual.exists() and actual.stat().st_size > 0
+            else:
+                from ..sources.ytdlp_based import YouTubeSource
+                from ..sources.base import TrackInfo
+                from ..config import Config
+                cfg = Config.from_env()
+                src = YouTubeSource(cfg.quality)
+                info = TrackInfo(source="youtube", url=url, artist="", title="", album="")
+                ok = src.download(info, actual)
+            if not ok or not actual.exists() or actual.stat().st_size == 0:
                 raise RuntimeError("download returned empty file")
 
-            actual = Path(tmp_path)
             mime = "audio/ogg" if actual.suffix == ".opus" else "audio/mpeg"
             with _preview_lock:
                 _preview_store[job_id]["ready"] = True

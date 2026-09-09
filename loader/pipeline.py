@@ -177,6 +177,10 @@ class Pipeline:
         to "t.A.T.u", and YouTube search is much more reliable with the
         canonical form. Originals are preserved as `raw_artist` / `raw_title`
         for logging.
+
+        C: if iTunes and MusicBrainz both return a duration and they differ
+        by >3%, the expected duration is unreliable — drop it and rely on
+        consensus/ceilings only (don't pool it as a trusted expected).
         """
         wanted = {"album", "year", "duration", "cover_url"}
         # Fields where we always take the enricher's value if it has one
@@ -185,6 +189,7 @@ class Pipeline:
         # Keep originals around for logs
         enriched.setdefault("raw_artist", t.get("artist", ""))
         enriched.setdefault("raw_title", t.get("title", ""))
+        enrichers_durations: dict[str, float] = {}
         for e in self.enrichers:
             try:
                 result = e.enrich(t.get("artist", ""), t.get("title", ""))
@@ -193,15 +198,46 @@ class Pipeline:
                 continue
             if not result:
                 continue
+            # Enrich-guard (shared): a versioned enricher title (remix /
+            # instrumental / psychoacoustic ...) must never override the
+            # CSV request — otherwise the request itself becomes the
+            # crooked version. When the title is refused, its duration is
+            # the WRONG version's length too — drop both, fall back to
+            # consensus (ТАйМСКВЕР: iTunes "Psychoacoustic Version" 226s
+            # vs plain 187s — the 229s live rip matched the wrong 226s).
+            refused_versioned = False
+            _rt = result.get("title")
+            if isinstance(_rt, str) and _rt:
+                from .match import is_bad_version as _is_bad_v0
+                if _is_bad_v0(_rt, t.get("title", "") or ""):
+                    refused_versioned = True
+                    log.info("  enrich: refusing versioned title %r for %r",
+                             _rt[:60], (t.get("title", "") or "")[:60])
+            dur = result.get("duration")
+            if isinstance(dur, (int, float)) and dur and dur > 0 and not refused_versioned:
+                enrichers_durations[e.name] = float(dur)
             for k, v in result.items():
                 if not v:
                     continue
                 if k in override_keys:
+                    if k == "title" and refused_versioned:
+                        continue
+                    if k == "duration" and refused_versioned:
+                        continue
                     enriched[k] = v  # always prefer canonical
                 elif not enriched.get(k):
+                    if k == "duration" and refused_versioned:
+                        continue
                     enriched[k] = v
             if all(enriched.get(k) for k in wanted):
                 break
+        # C: cross-check durations across enrichers
+        if len(enrichers_durations) >= 2:
+            vals = sorted(enrichers_durations.values())
+            if vals[-1] / max(vals[0], 1) - 1 > 0.03:
+                log.debug("enrich duration divergence %s, dropping expected duration",
+                          enrichers_durations)
+                enriched.pop("duration", None)
         return enriched
 
     def _enrich(self, tracks: List[dict]) -> List[dict]:
@@ -374,12 +410,23 @@ class Pipeline:
                 key = round(info.duration / 3.0)  # ±1.5s tolerance bucket
                 freq[key] = freq.get(key, 0) + 1
 
+        # yt-dlp durations (youtube/soundcloud search metadata) lie often
+        # (hour-long sets advertised as 3-min tracks) — trust them less.
+        # Direct MP3 hosts (lightaudio/sleymp3/zaycev) report real lengths.
+        _UNTRUSTED_DUR = {"youtube", "soundcloud"}
+        _DUR_TRUST = 0.35
+
         def _rank(item) -> tuple:
             _src, info = item
             dur = info.duration or 0
             f = freq.get(round(dur / 3.0), 0) if dur else 0
             if expected and dur:
                 near = abs(dur / expected - 1.0)
+                if _src.name in _UNTRUSTED_DUR:
+                    # Shrink toward "no info": untrusted durations only
+                    # count 35% — a lying 3-min set can't outrank an
+                    # honest direct-host copy anymore.
+                    near = near * _DUR_TRUST + 0.5 * (1 - _DUR_TRUST)
             elif expected:
                 near = float("inf")
             else:
@@ -440,8 +487,43 @@ class Pipeline:
         self._log(track, "failed", None)
         return False
 
+    @staticmethod
+    def _head_size_ok(url: str, expected_seconds, timeout: int = 10) -> tuple[bool, str]:
+        """HEAD Content-Length gate: skip hour-long sets before downloading.
+
+        With expected ±8% and 128–320kbps, a real track is ~1–8MB. A HEAD
+        reporting 30MB+ for a 3-min request is a set/compilation wearing
+        the right title — skip without spending 20s downloading it.
+        Unknown length (no header, chunked, HEAD refused) passes.
+        """
+        if not expected_seconds or expected_seconds <= 0:
+            return True, ""
+        try:
+            import requests as _rq
+            r = _rq.head(url, timeout=timeout, allow_redirects=True)
+            if r.status_code >= 400:
+                return True, ""
+            cl = r.headers.get("Content-Length")
+            if not cl:
+                return True, ""
+            size_mb = int(cl) / 1e6
+            # 320kbps ceiling for expected*1.08, +2MB slack for covers/tags
+            ceiling_mb = expected_seconds * 1.08 * 320 / 8 / 1000 + 2
+            if size_mb > max(ceiling_mb, 12):
+                return False, f"HEAD {size_mb:.0f}MB > {ceiling_mb:.0f}MB ceiling"
+        except Exception:
+            pass
+        return True, ""
+
     def _try_candidate(self, track: dict, src, info, out_path: Path, expected) -> bool:
         """Download one candidate and validate it (duration). True = accepted."""
+        # HEAD gate only for direct MP3 hosts (lightaudio/sleymp3/zaycev/
+        # mp3party/archiveorg): yt-dlp URLs are pages/extractors, not files.
+        if getattr(info, "url", "") and src.name not in ("youtube", "soundcloud"):
+            ok, reason = self._head_size_ok(info.url, expected)
+            if not ok:
+                log.info("  %s: size gate (%s), next candidate", src.name, reason)
+                return False
         for attempt in range(self.config.retries + 1):
             try:
                 if src.download(info, out_path):
@@ -478,11 +560,25 @@ class Pipeline:
         title = (track.get("title") or "").strip()
         album = (track.get("album") or "").strip()
         year = str(track.get("year") or "").strip()
+        # Tag sanity check BEFORE we overwrite tags: many sources stamp
+        # TPE1/TIT2 into the raw file — if those tags are present and
+        # strongly disagree with what we asked for, the source matched a
+        # wrong track (e.g. a cover under a similar title). Cheap 0s check.
+        ok, reason = self._verify_tags(out_path, artist, title)
+        if not ok:
+            log.info("  %s: tag mismatch (%s), next candidate", src.name, reason)
+            try:
+                out_path.unlink()
+            except OSError:
+                pass
+            return False
         # AcoustID verification: fingerprint the file and check that the
         # actual sound matches what we asked for. Catches fan-uploads,
         # covers, live versions, and other wrong-content files.
+        acoustid_decision = None
         if self.config.acoustid_verify and self.config.acoustid_api_key:
             ok, reason = self._verify_acoustid(out_path, artist, title)
+            acoustid_decision = getattr(self, "_last_acoustid_decision", None)
             if not ok:
                 log.info("  %s: acoustid mismatch (%s), next candidate", src.name, reason)
                 try:
@@ -490,6 +586,28 @@ class Pipeline:
                 except OSError:
                     pass
                 return False
+            # B: unknown+tagless is the lone gate hole — harden it:
+            # - unknown + tagged but weak → use 0.60 threshold (vs 0.35)
+            # - unknown + tagless → PCM dynamics gate (silence/flat)
+            if acoustid_decision == "unknown":
+                tag_ok, tag_reason = self._verify_tags(out_path, artist, title, threshold=0.60)
+                if not tag_ok:
+                    log.info("  %s: unknown+tag mismatch (%s), next candidate", src.name, tag_reason)
+                    try:
+                        out_path.unlink()
+                    except OSError:
+                        pass
+                    return False
+                pcm_gate_ok, pcm_reason = self._verify_pcm_dynamics(out_path)
+                if not pcm_gate_ok:
+                    log.info("  %s: unknown+pcm gate (%s), next candidate", src.name, pcm_reason)
+                    try:
+                        out_path.unlink()
+                    except OSError:
+                        pass
+                    return False
+        # Tag sanity for the non-acoustid or match/unknown-accepted path
+        # keeps the original 0.35 threshold (cheap pre-embed gate).
         embed(out_path, artist, title,
               info.album or album,
               info.year or year,
@@ -628,6 +746,107 @@ class Pipeline:
             return False
         return True
 
+    def _verify_tags(self, path: Path, expected_artist: str, expected_title: str, threshold: float | None = None) -> tuple[bool, str]:
+        """Compare embedded TPE1/TIT2 (or Vorbis artist/title) against expected.
+
+        If the raw download carries tags and they strongly disagree (score
+        below threshold), treat as a wrong-track download and let the next
+        candidate be tried. Files without tags or with weak disagreement
+        pass (many RU mp3party/sleymp3 deliveries are tagless). The unknown
+        branch uses a higher threshold (0.60) as per Sonnet's B fix.
+        """
+        _TAG_MISMATCH_THRESHOLD = threshold if threshold is not None else 0.35
+        try:
+            import mutagen
+            from mutagen.id3 import ID3
+
+            f = mutagen.File(str(path), easy=False)
+            if f is None:
+                return True, ""
+            # Try ID3 (MP3-flavored) first, then generic mutagen easy tags
+            # for FLAC/OGG/M4A/Vorbis.
+            got_artist = ""
+            got_title = ""
+            try:
+                id3 = ID3(str(path))
+                tpe1 = id3.get("TPE1")
+                tit2 = id3.get("TIT2")
+                if tpe1 and tpe1.text:
+                    got_artist = str(tpe1.text[0]).strip()
+                if tit2 and tit2.text:
+                    got_title = str(tit2.text[0]).strip()
+            except Exception:
+                pass
+            if not got_artist or not got_title:
+                # Fallback: mutagen easy/typed tags
+                def _first(tag, keys):
+                    for k in keys:
+                        v = tag.get(k)
+                        if not v:
+                            continue
+                        s = (v[0] if isinstance(v, (list, tuple)) else v)
+                        s = str(s).strip()
+                        if s:
+                            return s
+                    return ""
+                got_artist = got_artist or _first(f, ["artist", "TPE1", "\xa9ART", "Author"])
+                got_title = got_title or _first(f, ["title", "TIT2", "\xa9nam", "Title"])
+            if not got_artist and not got_title:
+                return True, ""
+            # Score the tag pair against what we asked for
+            try:
+                from .sources.base import score_match as _score
+
+                score = _score(expected_artist, expected_title, got_artist, got_title)
+            except Exception:
+                return True, ""
+            if score < _TAG_MISMATCH_THRESHOLD and max(len(got_artist), len(got_title)) >= 3:
+                snippet = f"{got_artist} - {got_title}".strip(" -")[:80]
+                return False, f"tags {snippet!r} (score {score:.2f})"
+        except Exception:
+            pass
+        return True, ""
+
+    _last_acoustid_decision: str | None = None
+
+    def _verify_pcm_dynamics(self, path: Path) -> tuple[bool, str]:
+        """Cheap silence / flat-dynamics gate for unknown+tagless (Sonnet).
+
+        Re-uses the same PCM that verify_file decodes for AcoustID (audioread
+        → mono 11025 Hz int16) — no scipy. Gates: RMS silence, and per-second
+        RMS variance so a speech/ambient file of correct length but flat
+        dynamics is rejected. Too-short files pass (not enough windows).
+        """
+        try:
+            from .verifier import _decode_to_pcm
+        except Exception:
+            return True, ""
+        try:
+            pcm_bytes, sr, _ch, _dur = _decode_to_pcm(path)
+        except Exception:
+            return True, ""
+        try:
+            import numpy as np
+
+            pcm = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float64)
+            if pcm.size == 0:
+                return False, "silence (empty)"
+            rms = float(np.sqrt(np.mean(pcm * pcm)))
+            if rms < 200:  # int16 scale
+                return False, f"silence (rms {rms:.0f})"
+            win = sr
+            windows = [pcm[i : i + win] for i in range(0, len(pcm) - win, win)]
+            if len(windows) < 5:
+                return True, "too_short_to_judge"
+            rms_windows = [float(np.sqrt(np.mean(w * w))) for w in windows]
+            mean = float(np.mean(rms_windows)) + 1e-6
+            variance_ratio = float(np.std(rms_windows) / mean)
+            if variance_ratio < 0.08:
+                return False, f"flat dynamics (var {variance_ratio:.3f})"
+        except Exception:
+            return True, ""
+        return True, ""
+
     def _verify_acoustid(self, path: Path, expected_artist: str, expected_title: str) -> tuple[bool, str]:
         """Fingerprint an audio file and check it matches what we asked for.
 
@@ -639,6 +858,7 @@ class Pipeline:
         try:
             from .verifier import verify_file
         except ImportError:
+            self._last_acoustid_decision = None
             return True, "verifier not available"
         try:
             result = verify_file(
@@ -647,8 +867,10 @@ class Pipeline:
                 expected=(expected_artist, expected_title),
             )
         except Exception as e:
+            self._last_acoustid_decision = None
             return True, f"verify error: {e}"
 
+        self._last_acoustid_decision = result.decision
         if result.decision == "mismatch":
             return False, f"got {result.found_artist} - {result.found_title} (score {result.acoustid_score:.2f})"
         # match, unknown, or preview → accept (we don't know better)

@@ -1,40 +1,67 @@
 <script>
 
-  import { t } from '../lib/i18n.js';
+  import { t, langStore } from '../lib/i18n.js';
+  $: _lang = $langStore;
   import { api } from '../lib/api.js';
+  import { playPreviewUrl } from '../lib/player.js';
   import { onMount } from 'svelte';
-  let q=''; let results=[]; let loading=false; let progress='';
+  let q=''; let results=[]; let sourcesSearched=0; let loading=false; let progress='';
+  let searchCtl=null; let searchSeq=0; let previewCtl=null; let previewPoll=null; let dlPoll=null;
   async function doSearch(){
     if(!q.trim()) return;
+    if(searchCtl) try{ searchCtl.abort(); }catch(e){}
+    if(previewPoll){ clearInterval(previewPoll); previewPoll=null; }
+    if(previewCtl) try{ previewCtl.abort(); }catch(e){}
+    searchSeq++; const mySeq=searchSeq;
+    searchCtl = new AbortController();
     loading=true; progress='';
-    try{ const d = await api('/api/search?q='+encodeURIComponent(q)); results = (d.results||[]).map(r=> ({...r, _sel:false, _previewUrl: r.preview_url || r.url})); }catch(e){ results=[]; } loading=false;
+    try{
+      const d = await api('/api/search?q='+encodeURIComponent(q), { signal: searchCtl.signal });
+      if(mySeq!==searchSeq) return;
+      results = (d.results||[]).map(r=> ({...r, _sel:false, _previewUrl: r.preview_url || r.url})); sourcesSearched = d.sources_searched||0;
+    }catch(e){ if(e.name==='AbortError') return; results=[]; sourcesSearched=0; }
+    loading=false; searchCtl=null;
   }
   async function dlSelected(){
     const sel = results.filter(r=>r._sel);
     if(!sel.length) return;
+    if(dlPoll){ clearInterval(dlPoll); dlPoll=null; }
     const tracks = sel.map(r=>({artist:r.artist||'', title:r.title||'', album:r.album||''}));
     const resp = await api('/api/download', { method:'POST', body: JSON.stringify({ source:'search', tracks, options:{} }) });
     progress='Started ' + resp.total + ' tracks';
-    const iv=setInterval(async()=>{
-      try{ const s=await api('/api/download/'+resp.job_id); const p=s.progress||{ok:0,failed:0,total:0}; progress = `${p.ok} ok, ${p.failed} failed / ${p.total}`; if(s.done||s.cancelled){ clearInterval(iv); progress = s.cancelled ? 'Cancelled' : '✅ Complete'; } }catch(e){ clearInterval(iv); }
+    let dlTicks=0;
+    dlPoll=setInterval(async()=>{
+      dlTicks++;
+      if(dlTicks>120){ clearInterval(dlPoll); dlPoll=null; progress='Timeout polling download'; return; }
+      try{ const s=await api('/api/download/'+resp.job_id); const p=s.progress||{ok:0,failed:0,total:0}; progress = `${p.ok} ok, ${p.failed} failed / ${p.total}`; if(s.done||s.cancelled){ clearInterval(dlPoll); dlPoll=null; progress = s.cancelled ? 'Cancelled' : '✅ Complete'; } }catch(e){ clearInterval(dlPoll); dlPoll=null; }
     }, 1000);
   }
-  let previewUrl=null; let previewAudio;
   async function preview(r){
-    const url = r.url || r.preview_url || r.stream_url;
-    if(!url) return;
+    if(previewPoll){ clearInterval(previewPoll); previewPoll=null; }
+    if(previewCtl) try{ previewCtl.abort(); }catch(e){}
+    const payload = { url: r.url || r.preview_url || r.stream_url || '' };
+    if(r.audio_data){ payload.audio_data = r.audio_data; payload.raw_title = r.raw_title || r.title || ''; payload.raw_artist = r.raw_artist || r.artist || ''; }
+    if(!payload.url && !payload.audio_data) return;
+    previewCtl = new AbortController();
     try{
-      const j = await api('/api/preview', {method:'POST', body: JSON.stringify({url})});
-      // poll status
-      const poll = setInterval(async()=>{
+      const j = await api('/api/preview', {method:'POST', body: JSON.stringify(payload), signal: previewCtl.signal});
+      let ticks=0;
+      previewPoll=setInterval(async()=>{
+        ticks++;
+        if(ticks>60){ clearInterval(previewPoll); previewPoll=null; progress='Preview timeout'; return; }
         try{
-          const st = await api(`/api/preview/${j.job_id}/status`);
-          if(st.error){ clearInterval(poll); progress='Preview failed: '+st.error; }
-          if(st.ready){ clearInterval(poll); previewUrl = j.stream_url || `/api/preview/${j.job_id}/stream`; if(previewAudio){ previewAudio.src = previewUrl; previewAudio.play(); } }
-        }catch(e){}
+          const st = await api(`/api/preview/${j.job_id}/status`, { signal: previewCtl.signal });
+          if(st.error){ clearInterval(previewPoll); previewPoll=null; progress='Preview failed: '+st.error; }
+          else if(st.ready){
+            clearInterval(previewPoll); previewPoll=null;
+            const stream = j.stream_url || `/api/preview/${j.job_id}/stream`;
+            playPreviewUrl(stream, { artist: r.artist||'', title: r.title||'' });
+          }
+        }catch(e){ if(e.name==='AbortError') { clearInterval(previewPoll); previewPoll=null; } }
       }, 500);
-    }catch(e){}
+    }catch(e){ if(e.name==='AbortError') return; }
   }
+  onMount(()=>{ return ()=>{ if(searchCtl) try{searchCtl.abort();}catch(e){}; if(previewCtl) try{previewCtl.abort();}catch(e){}; if(previewPoll) clearInterval(previewPoll); if(dlPoll) clearInterval(dlPoll); }; });
 
 </script>
 
@@ -46,7 +73,7 @@
   {#if progress}<p class="hint">{progress}</p>{/if}
   {#if loading}<p class="hint">{t('common.searching')}</p>{/if}
   {#if results.length}
-    <div class="toolbar"><span class="count">{results.length} {t('search.results', {n: results.length, s: 'sources'})}</span><button class="btn-primary" style="margin-top:0" on:click={dlSelected}>{t('search.downloadSelected')}</button></div>
+    <div class="toolbar"><span class="count">{t('search.results', {n: results.length, s: sourcesSearched})}</span><button class="btn-primary" style="margin-top:0" on:click={dlSelected}>{t('search.downloadSelected')}</button></div>
     {#each results as r}
       <label class="result-card">
         <span class="result-label">
@@ -57,7 +84,6 @@
         </span>
       </label>
     {/each}
-    <audio bind:this={previewAudio} controls style="width:100%;margin-top:1rem" preload="none"></audio>
   {:else if !loading && q}
     <p class="hint">{t('search.noResults')}</p>
   {/if}

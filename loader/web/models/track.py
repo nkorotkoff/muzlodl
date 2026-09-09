@@ -279,6 +279,11 @@ def scan_library(library_dir: Path) -> int:
         total=len(pending),
     )
     for f, rel, artist, title, album in pending:
+        dur = _probe_duration(f)
+        # Same 60s floor as the pipeline: skip 30s previews/clips that
+        # were dropped into the folder manually — scan must not index junk.
+        if dur and dur < 60:
+            continue
         add(
             session_id=session_id,
             artist=artist,
@@ -286,7 +291,7 @@ def scan_library(library_dir: Path) -> int:
             album=album,
             file_path=rel,
             file_size=f.stat().st_size,
-            duration=_probe_duration(f),
+            duration=dur,
             status="ok",
             source_name="",
         )

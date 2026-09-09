@@ -1,6 +1,7 @@
 <script>
 
-  import { t } from '../lib/i18n.js';
+  import { t, langStore } from '../lib/i18n.js';
+  $: _lang = $langStore;
   import { api } from '../lib/api.js';
   import { onMount } from 'svelte';
   let pending = [];

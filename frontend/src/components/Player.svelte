@@ -1,6 +1,7 @@
 <script>
   import { currentId, queue, queueIndex, isPlaying, currentTime, duration, volume, shuffle, bindAudio, next, prev, togglePlay, seekTo, setVolume, closePlayer, toggleShuffle } from '../lib/player.js';
-  import { t } from '../lib/i18n.js';
+  import { t, langStore } from '../lib/i18n.js';
+  $: _lang = $langStore;
   let audioEl;
   import { onMount } from 'svelte';
   onMount(()=> bindAudio(audioEl));

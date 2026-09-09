@@ -143,4 +143,15 @@ export function toggleShuffle(){
   }
   setTimeout(save,100);
 }
+export function playPreviewUrl(url, info={}){
+  if(!audio) return;
+  const fakeId = `preview:${Date.now()}`;
+  const fake = { id: fakeId, artist: info.artist||'', title: info.title||'', _preview: true };
+  queue.set([fake]);
+  queueIndex.set(0);
+  currentId.set(fakeId);
+  audio.src = url;
+  audio.play();
+}
+
 export function closePlayer(){ currentId.set(null); if(audio) audio.pause(); try{ localStorage.removeItem(KEY); }catch(e){} }

@@ -1,6 +1,7 @@
 <script>
 
-  import { t } from '../lib/i18n.js';
+  import { t, langStore } from '../lib/i18n.js';
+  $: _lang = $langStore;
   import { api } from '../lib/api.js';
   import { onMount } from 'svelte';
   let data = { summary:{total_plays:0, unique_tracks:0, last_7_days:0}, top_tracks:[], top_artists:[], recent:[] };

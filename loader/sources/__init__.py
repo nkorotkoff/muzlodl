@@ -2,8 +2,6 @@
 from .base import Source, TrackInfo
 from .ytdlp_based import YouTubeSource, BandcampSource, SoundCloudSource
 from .ytdlp_extras import DailymotionSource
-from .yandex import YandexMusicSource
-from .jamendo import JamendoSource
 from .archiveorg import ArchiveOrgSource
 from .lightaudio import LightAudioSource
 from .mp3party import MP3PartySource
@@ -19,8 +17,6 @@ __all__ = [
     "BandcampSource",
     "SoundCloudSource",
     "DailymotionSource",
-    "YandexMusicSource",
-    "JamendoSource",
     "ArchiveOrgSource",
     "LightAudioSource",
     "MP3PartySource",

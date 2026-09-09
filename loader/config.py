@@ -14,9 +14,8 @@ class Config:
     # Source chain, in order. First working source wins per track.
     # itunes_preview is excluded by default — opt in via --include-previews.
     # Broken sources (audius JSON errors, wikicommons 403, bilibili 412,
-    # openverse 0 hits, bandcamp 403, dailymotion bad search scheme,
-    # jamendo needs a key, yandex needs the package + token for full tracks)
-    # are removed from the default chain to keep doctor output and download
+    # openverse 0 hits, bandcamp 403, dailymotion bad search scheme) are
+    # removed from the default chain to keep doctor output and download
     # logs clean. Pass --sources explicitly to re-enable any of them.
     enabled_sources: List[str] = field(default_factory=lambda: [
         "youtube", "soundcloud", "lightaudio", "mp3party", "sleymp3", "zaycev", "archiveorg",
@@ -64,8 +63,6 @@ class Config:
     delete_after_upload: bool = False
 
     # Credentials (also read from env)
-    yandex_token: str = ""
-    jamendo_client_id: str = ""
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     # Cookies file (Netscape format) for yt-dlp sources. YouTube rate-limits
@@ -77,9 +74,7 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
-            yandex_token=os.environ.get("YANDEX_TOKEN", ""),
             acoustid_api_key=os.environ.get("ACOUSTID_API_KEY", ""),
-            jamendo_client_id=os.environ.get("JAMENDO_CLIENT_ID", ""),
             spotify_client_id=os.environ.get("SPOTIFY_CLIENT_ID", ""),
             spotify_client_secret=os.environ.get("SPOTIFY_CLIENT_SECRET", ""),
             yt_cookies=os.environ.get("YT_COOKIES", ""),
