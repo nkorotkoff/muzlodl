@@ -203,10 +203,33 @@ def api_download():
 
 @bp.route("/api/jobs")
 def api_jobs():
-    """List all background jobs (running + recent finished)."""
+    """List background jobs. Per-file cloud_sync jobs are collapsed
+    into one aggregate entry per group (☁ Sync N files — done/total),
+    so 900 tiny jobs don't flood the panel."""
     with _jobs_lock:
         jobs = []
+        groups: dict[str, dict] = {}
         for j in _download_jobs.values():
+            if j.get("type") == "cloud_sync" and j.get("group_id"):
+                g = groups.setdefault(j["group_id"], {
+                    "id": "", "type": "cloud_sync_group",
+                    "title": "", "done": True, "cancelled": False,
+                    "error": None, "ok": 0, "failed": 0, "total": 0,
+                    "group_id": j["group_id"],
+                })
+                p = j.get("progress", {})
+                g["total"] += 1
+                g["ok"] += p.get("ok", 0)
+                g["failed"] += p.get("failed", 0)
+                if not j.get("done"):
+                    g["done"] = False
+                if j.get("cancelled"):
+                    g["cancelled"] = True
+                if j.get("error") and not g["error"]:
+                    g["error"] = j["error"]
+                if not g["id"]:
+                    g["id"] = j["id"]
+                continue
             jobs.append({
                 "id": j.get("id", ""),
                 "type": j.get("type", "task"),
@@ -215,6 +238,18 @@ def api_jobs():
                 "cancelled": j.get("cancelled", False),
                 "error": j.get("error"),
                 "progress": j.get("progress", {"ok": 0, "failed": 0, "total": 0}),
+            })
+        for g in groups.values():
+            jobs.append({
+                "id": g["id"],
+                "type": "cloud_sync_group",
+                "group_id": g["group_id"],
+                "title": f"☁ Sync {g['total']} files",
+                "done": g["done"],
+                "cancelled": g["cancelled"],
+                "error": g["error"],
+                "progress": {"ok": g["ok"], "failed": g["failed"],
+                             "total": g["total"]},
             })
     # Newest first
     jobs.reverse()
@@ -240,7 +275,14 @@ def api_cancel_download(job_id: str):
     with _jobs_lock:
         job = _download_jobs.get(job_id)
         if job:
-            job["cancelled"] = True
+            # Cancelling the aggregate group entry stops the whole chain:
+            # mark every per-file job of the group cancelled.
+            if job.get("type") == "cloud_sync_group" and job.get("group_id"):
+                for j in _download_jobs.values():
+                    if j.get("group_id") == job["group_id"]:
+                        j["cancelled"] = True
+            else:
+                job["cancelled"] = True
     db.update_job_status(job_id, "cancelled")
     return jsonify({"ok": True})
 

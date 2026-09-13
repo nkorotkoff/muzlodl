@@ -11,6 +11,7 @@
   let cloudStatus='...'; let cloudMsg='';
   let doctor=[]; let doctorLoading=false;
   let reencodeBitrate='128'; let reencodeProgress='';
+  let syncMode='manual';
   let maintMsg='';
   function switchTab(n){ tab=n; try{localStorage.setItem('settings-tab', n);}catch(e){} }
   function scheduleSave(){
@@ -32,7 +33,7 @@
       sourcesAuto = (d.sources_auto !== 'false');
       try{ sources = JSON.parse(d.sources||'[]'); if(!Array.isArray(sources)) sources=[]; }catch(e){ sources=[]; }
     }catch(e){}
-    try{ const c=await api('/api/cloud/status'); cloudStatus = c.configured ? `${c.backend} ${c.reachable?'✅':''} /${c.root||'music'}` : t('settings.cloudNotConfigured'); }catch(e){ cloudStatus=''; }
+    try{ const c=await api('/api/cloud/status'); cloudStatus = c.configured ? `${c.backend} ${c.reachable?'✅':''} /${c.root||'music'}` : t('settings.cloudNotConfigured'); if(c.configured){ cloud.backend=c.backend; cloud.login=c.login||''; cloud.root=c.root||'music'; cloud.password=''; } if(c.sync_mode) syncMode=c.sync_mode; }catch(e){ cloudStatus=''; }
   }
   async function runDoctor(){
     doctorLoading=true; doctor=[];
@@ -49,7 +50,8 @@
     }catch(e){ cloudMsg='❌ '+(e.message||'error'); }
   }
   async function clearCloud(){ await api('/api/cloud/config', {method:'DELETE'}); cloudMsg=t('common.cleared'); load(); }
-  async function uploadCloud(){ maintMsg=t('settings.uploading'); try{ const r=await api('/api/cloud/upload', {method:'POST'}); const iv=setInterval(async()=>{ const st=await api('/api/download/'+r.job_id); if(st.done){ clearInterval(iv); maintMsg='✅ '+t('common.uploaded'); } }, 1000); }catch(e){ maintMsg='❌ '+e.message; } }
+  async function saveSyncMode(){ try{ await api('/api/cloud/upload', {method:'POST', body: JSON.stringify({mode: syncMode, dry: true})}); }catch(e){} }
+  async function uploadCloud(){ maintMsg=t('settings.uploading'); try{ const r=await api('/api/cloud/upload', {method:'POST', body: JSON.stringify({mode: syncMode})}); if(r.message || !r.group_id){ maintMsg='✅ '+t('common.uploaded'); return; } const iv=setInterval(async()=>{ const st=await api('/api/cloud/sync/status'); const p={ok: st.done||0, failed: st.failed||0, total: st.total||0}; maintMsg=`${p.ok} ok, ${p.failed} failed / ${p.total}`; if(!st.running){ clearInterval(iv); maintMsg='✅ '+t('common.uploaded'); } }, 1000); }catch(e){ maintMsg='❌ '+e.message; } }
   async function startReencode(){ maintMsg=t('settings.starting'); try{ const r=await api('/api/library/reencode', {method:'POST', body: JSON.stringify({bitrate: parseInt(reencodeBitrate)})}); const iv=setInterval(async()=>{ const st=await api('/api/download/'+r.job_id); const p=st.progress||{ok:0,total:0}; reencodeProgress = `${p.ok}/${p.total}`; if(st.done){ clearInterval(iv); reencodeProgress='✅ Done'; } }, 1000); }catch(e){ maintMsg='❌ '+e.message; } }
   async function retryFailed(){ maintMsg=t('settings.retrying'); try{ const r=await api('/api/library/retry-failed', {method:'POST'}); maintMsg=t('settings.retryingCount', {n: r.total}); }catch(e){ maintMsg='❌ '+e.message; } }
   onMount(()=>{ const saved=(()=>{try{return localStorage.getItem('settings-tab');}catch(e){return null}})(); if(saved) tab=saved; load(); });
@@ -103,12 +105,24 @@
       {:else if tab==='cloud'}
         <section class="settings-panel"><div class="card"><h3>{t('settings.cloud')}</h3><div>{cloudStatus}</div>
           <div style="margin-top:.75rem">
-            <select bind:value={cloud.backend}><option value="yandex">Yandex.Disk (WebDAV)</option><option value="yandex_rest">Yandex.Disk (REST)</option><option value="mailru">Cloud.Mail.ru</option></select>
+            <select bind:value={cloud.backend}><option value="yandex">Yandex.Disk (WebDAV)</option><option value="yandex_rest">Yandex.Disk (REST)</option><option value="mailru">Cloud.Mail.ru</option><option value="telegram">Telegram (channel)</option></select>
+            {#if cloud.backend==='telegram'}
+              <label>Channel ID <input type="text" placeholder="-1001234567890" bind:value={cloud.login}></label>
+              <label>Bot token <input type="password" placeholder="from @BotFather" bind:value={cloud.password}></label>
+              <p class="hint">{t('settings.telegramHint')}</p>
+            {:else}
             <label>{t('settings.login')} <input type="text" bind:value={cloud.login}></label>
             <label>{t('settings.appPassword')} <input type="password" bind:value={cloud.password}></label>
+            {/if}
+            {#if cloud.backend!=='telegram'}
             <label>{t('settings.rootFolder')} <input type="text" bind:value={cloud.root}></label>
+            {/if}
             <div class="btn-row"><button on:click={saveCloud}>{t('settings.saveTest')}</button><button class="btn-del" on:click={clearCloud}>{t('settings.remove')}</button></div>
             {#if cloudMsg}<p class="hint">{cloudMsg}</p>{/if}
+          </div>
+          <div style="margin-top:.75rem">
+            <label>{t('settings.syncMode')} <select bind:value={syncMode} on:change={saveSyncMode}><option value="manual">{t('settings.syncManual')}</option><option value="auto">{t('settings.syncAuto')}</option></select></label>
+            <p class="hint">{t('settings.syncHint')}</p>
           </div>
           <button on:click={uploadCloud} class="btn-primary" style="margin-top:.75rem">{t('settings.uploadLibrary')}</button>
         </div></section>

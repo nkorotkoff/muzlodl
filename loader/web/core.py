@@ -29,6 +29,12 @@ def _resolve_static() -> Path:
 _download_jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
+# Audio extensions eligible for cloud sync.
+SYNC_EXTS = {".opus", ".mp3", ".m4a", ".flac", ".ogg", ".webm"}
+
+# How often the cloud watcher scans the library for unsynced files.
+SYNC_INTERVAL = 5 * 60  # 5 minutes
+
 # Preview temp files
 _PREVIEW_CLEANUP_TTL = 600  # 10 minutes
 _preview_store: dict = {}

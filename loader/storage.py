@@ -26,6 +26,7 @@ from typing import Optional
 import requests
 
 from .webdav import WebDAVClient, WebDAVError
+from .telegram import TelegramClient, TelegramError
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,19 @@ BACKENDS = {
         ),
         "root": "music",
     },
+    "telegram": {
+        "name": "Telegram (private channel)",
+        "endpoint": "https://api.telegram.org",
+        "howto_url": "https://t.me/BotFather",
+        "howto": (
+            "1. Talk to @BotFather in Telegram: /newbot, pick a name\n"
+            "2. Copy the bot token (looks like 123456:ABC-...)\n"
+            "3. Create a private channel, add the bot as admin\n"
+            "4. Get the channel id (e.g. -1001234567890): forward any\n"
+            "   message to @userinfobot or check via @getmyid_bot"
+        ),
+        "root": "music",
+    },
 }
 
 
@@ -95,6 +109,10 @@ class CloudStorage(ABC):
         ...
 
     # ---- bulk upload (post-run) ----
+    # Telegram is sequential-only (Bot API flood limits + a shared JSON
+    # registry). _SEQUENTIAL forces max_workers=1 regardless of caller.
+    _SEQUENTIAL = False
+
     def upload_library(self, library_dir: Path, max_workers: int = 4,
                        progress_cb=None) -> int:
         """Upload all albums. If progress_cb(done, total) is provided,
@@ -117,6 +135,8 @@ class CloudStorage(ABC):
         if not albums:
             return 0
         total = len(albums)
+        if self._SEQUENTIAL:
+            max_workers = 1
         # Upload in parallel (one thread per album)
         if max_workers > 1:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -462,7 +482,86 @@ def make_storage(config: CloudConfig) -> CloudStorage:
         return YandexDiskRESTStorage(config)
     if config.backend == "mailru":
         return MailRuStorage(config)
+    if config.backend == "telegram":
+        return TelegramStorage(config)
     raise ValueError(f"unknown backend: {config.backend}")
+
+
+class TelegramStorage(CloudStorage):
+    """Telegram private channel via Bot API.
+
+    Unlike WebDAV backends there are no folders on the server side —
+    Artist/Album identity goes into the message caption (and the
+    performer/title audio fields, so the phone player shows it nicely).
+    Sync state (caption path -> file_id + size) lives in a local JSON
+    registry, so re-runs skip already-uploaded tracks.
+    """
+    name = "telegram"
+    _SEQUENTIAL = True
+
+    def _make_client(self) -> "TelegramClient":
+        # login field is unused; chat_id is stored in login,
+        # bot token in password (matches cloud-setup prompts).
+        return TelegramClient(self.config.password, self.config.login)
+
+    def _identity(self, artist: str, album: str, title: str) -> str:
+        album = album if album else "Singles"
+        return f"{artist}/{album}/{title}"
+
+    def _upload_album(self, album_dir: Path, artist: str, album: str) -> bool:
+        tracks = sorted(p for p in album_dir.iterdir()
+                        if p.is_file() and p.suffix.lower() in AUDIO_EXTS
+                        and p.stat().st_size > 0)
+        if not tracks:
+            return False
+        log.info("uploading %d tracks: %s/%s", len(tracks), artist, album)
+        ok = True
+        for t in tracks:
+            identity = self._identity(artist, album, t.stem)
+            try:
+                if not self.client.upload(t, identity):
+                    ok = False
+            except TelegramError as e:
+                log.error("  failed %s: %s", t.name, e)
+                ok = False
+        if ok:
+            log.info("  ok: %s/%s", artist, album)
+        return ok
+
+    def upload_single(self, local_path: Path, artist: str, album: str,
+                      title: str, retries: int = 2) -> bool:
+        local_path = Path(local_path)
+        if not local_path.exists() or local_path.stat().st_size == 0:
+            return False
+        identity = self._identity(artist, album, title)
+        for attempt in range(retries + 1):
+            try:
+                return bool(self.client.upload(local_path, identity))
+            except TelegramError as e:
+                status = str(e)
+                # Flood control: Bot API asks to wait N seconds.
+                wait = _flood_wait(status)
+                if wait is not None:
+                    log.warning("  telegram flood control, waiting %ds", wait)
+                    time.sleep(wait + 1)
+                    continue
+                if attempt < retries:
+                    delay = 2 ** attempt
+                    log.warning(f"  telegram upload retry {attempt+1}/{retries} "
+                                f"after {delay}s: {e}")
+                    time.sleep(delay)
+                else:
+                    log.error(f"  telegram upload failed after {retries+1} attempts: {e}")
+        return False
+
+
+def _flood_wait(error_text: str) -> Optional[int]:
+    """Parse 'retry after N' from a 429 flood-control error."""
+    import re
+    m = re.search(r"retry after (\d+)", error_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 def _safe(name: str) -> str:

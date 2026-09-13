@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import os
 import sys
@@ -174,12 +175,41 @@ def cmd_cloud_setup(args):
         print(f"  saved to {cloud_path()}")
         return 0
 
+    # telegram uses a bot token + channel id, not login/password
+    if backend == "telegram":
+        try:
+            token = getpass.getpass("  bot token from @BotFather (input hidden): ").strip()
+            if not token:
+                print("aborted")
+                return 1
+            chat_id = input("  channel id (e.g. -1001234567890): ").strip()
+            if not chat_id:
+                print("aborted")
+                return 1
+        except (EOFError, KeyboardInterrupt):
+            print("\naborted")
+            return 1
+        print()
+        print("Testing connection...")
+        try:
+            from .telegram import TelegramClient
+            client = TelegramClient(token, chat_id)
+            info = client.check_access()
+            print(f"  OK — bot @{info.get('username', '?')}, channel reachable")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            return 1
+        config = CloudConfig(backend=backend, login=chat_id, password=token,
+                             root=b["root"])
+        save_cloud(config)
+        print(f"  saved to {cloud_path()}")
+        return 0
+
     try:
         login = input("  login (email or username): ").strip()
         if not login:
             print("aborted")
             return 1
-        import getpass
         password = getpass.getpass("  app password (input hidden): ").strip()
         if not password:
             print("aborted")
@@ -235,6 +265,16 @@ def cmd_cloud_status(args):
             print("status:   NOT REACHABLE (token may have been revoked)")
         return 0
 
+    if config.backend == "telegram":
+        from .telegram import TelegramClient, TelegramError
+        try:
+            client = TelegramClient(config.password, config.login)
+            info = client.check_access()
+            print(f"status:   reachable (bot @{info.get('username', '?')})")
+        except TelegramError as e:
+            print(f"status:   ERROR ({e})")
+        return 0
+
     try:
         client = WebDAVClient(b.get("endpoint"), config.login, config.password)
         if client.exists("/"):
@@ -267,6 +307,16 @@ def cmd_cloud_test(args):
         print(f"file not found: {src}")
         return 1
     storage = make_storage(config)
+    if config.backend == "telegram":
+        from .telegram import TelegramError
+        try:
+            ok = storage.upload_single(src, "__test__", "", src.stem)
+            print("  uploaded to the channel (__test__)" if ok else "  FAILED")
+            print("  test: open the channel in Telegram and check the audio message")
+            return 0 if ok else 1
+        except TelegramError as e:
+            print(f"  ERROR: {e}")
+            return 1
     remote = f"{config.root}/__test__/{_safe(src.name)}"
     try:
         storage.client.upload_streaming(src, remote)

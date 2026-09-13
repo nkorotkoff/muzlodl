@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 import flask
@@ -345,6 +346,13 @@ def _run_download(job_id: str) -> None:
     except Exception as e:
         log.error("download job %s failed: %s", job_id, e)
     finally:
+        # Auto-sync: push the whole library to the configured cloud
+        # (e.g. Telegram channel) when cloud_sync_mode == "auto".
+        # Manual mode skips this — the user syncs via the cloud button.
+        try:
+            _maybe_auto_sync()
+        except Exception as e:
+            log.warning("auto cloud sync failed: %s", e)
         with _jobs_lock:
             if job_id in _download_jobs:
                 _download_jobs[job_id]["done"] = True
@@ -360,14 +368,52 @@ def _run_download(job_id: str) -> None:
                 pass
 
 
-def _resume_interrupted_jobs() -> None:
-    """Re-create download jobs that were running when the server died.
+def _maybe_auto_sync() -> bool:
+    """Enqueue unsynced files if cloud_sync_mode is 'auto' (default: manual).
 
-    Each job's session holds per-track status in the DB; we re-collect the
-    still-pending tracks and continue from where we left off (finished
-    tracks stay ok/cached, files are not re-downloaded via skip_existing).
+    Returns True when files were queued. No-op when no cloud is
+    configured or the mode is manual — the user syncs via the cloud tab.
+    Unlike the old bulk upload, this creates small per-file jobs through
+    the sync queue so progress stays granular.
+    """
+    from . import sync_queue
+    settings = db.get_all_settings()
+    if settings.get("cloud_sync_mode", "manual") != "auto":
+        return False
+    from ..credentials import load_cloud
+    if not load_cloud():
+        log.debug("auto sync: no cloud configured, skipping")
+        return False
+    pending = sync_queue.scan_unsynced()
+    if not pending:
+        return False
+    sync_queue.enqueue_files(pending)
+    log.info("auto cloud sync queued %d files", len(pending))
+    return True
+
+
+def _resume_interrupted_jobs() -> None:
+    """Re-create jobs that were running when the server died.
+
+    Download jobs: re-collect still-pending tracks from the session and
+    continue (finished tracks stay ok/cached, files not re-downloaded
+    via skip_existing).
+
+    Cloud sync files stuck in 'uploading' (their worker died with the
+    process): flip back to 'pending' so the watcher picks them up on
+    its next pass. Done rows are untouched — Telegram dedups by registry
+    anyway, so nothing is re-sent.
     """
     from .routes_download import _jobs_lock, _download_jobs  # shared registry
+
+    with db.tx() as conn:
+        stuck = conn.execute(
+            "UPDATE cloud_sync SET status='pending', job_id='', updated_at=? "
+            "WHERE status='uploading'",
+            (datetime.now(timezone.utc).isoformat(),),
+        ).rowcount
+    if stuck:
+        log.info("resumed %d interrupted sync files -> pending", stuck)
 
     for row in db.list_running_jobs():
         job_id = row["id"]
@@ -423,11 +469,14 @@ def _resume_interrupted_jobs() -> None:
 
 # Background threads (started once at import)
 from .core import cleanup_old_previews, library_watcher
+from .sync_queue import cloud_watcher
 
 _thread = threading.Thread(target=cleanup_old_previews, daemon=True)
 _thread.start()
 _sync_thread = threading.Thread(target=library_watcher, daemon=True)
 _sync_thread.start()
+_cloud_thread = threading.Thread(target=cloud_watcher, daemon=True)
+_cloud_thread.start()
 # Resume jobs that were running before the previous server died.
 _resume_thread = threading.Thread(target=_resume_interrupted_jobs, daemon=True)
 _resume_thread.start()

@@ -71,6 +71,15 @@ def init_db() -> None:
                 track_id   INTEGER NOT NULL,
                 played_at  TEXT    NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS cloud_sync (
+                file_path TEXT PRIMARY KEY,
+                size      INTEGER NOT NULL DEFAULT 0,
+                status    TEXT    NOT NULL DEFAULT 'pending',
+                job_id    TEXT    NOT NULL DEFAULT '',
+                error     TEXT    NOT NULL DEFAULT '',
+                updated_at TEXT   NOT NULL DEFAULT ''
+            );
         """)
 
         # Schema version check
