@@ -2,7 +2,7 @@
 
   import { t, langStore } from '../lib/i18n.js';
   $: _lang = $langStore;
-  import { api } from '../lib/api.js';
+  import { api, BASE } from '../lib/api.js';
   import { playPreviewUrl } from '../lib/player.js';
   import { onMount } from 'svelte';
   let q=''; let results=[]; let sourcesSearched=0; let loading=false; let progress='';
@@ -54,7 +54,7 @@
           if(st.error){ clearInterval(previewPoll); previewPoll=null; progress='Preview failed: '+st.error; }
           else if(st.ready){
             clearInterval(previewPoll); previewPoll=null;
-            const stream = j.stream_url || `/api/preview/${j.job_id}/stream`;
+            const stream = j.stream_url || (BASE + `/api/preview/${j.job_id}/stream`);
             playPreviewUrl(stream, { artist: r.artist||'', title: r.title||'' });
           }
         }catch(e){ if(e.name==='AbortError') { clearInterval(previewPoll); previewPoll=null; } }

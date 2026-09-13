@@ -1,6 +1,8 @@
 
 import { writable, get } from 'svelte/store';
-import { api } from './api.js';
+import { api, BASE } from './api.js';
+
+const apiUrl = (p) => (p.startsWith('/') ? BASE + p : p);
 
 const KEY='music-loader-player';
 
@@ -61,7 +63,7 @@ function restore(){
     if(Array.isArray(s.shuffleOrder)){ shuffleOrder=s.shuffleOrder; shufflePos=typeof s.shufflePos==='number'? s.shufflePos:0; }
     if(!audio) return;
     const seek = typeof s.time==='number'? s.time:0;
-    audio.src = `/api/library/${s.id}/stream`;
+    audio.src = apiUrl(`/api/library/${s.id}/stream`);
     const onMeta=()=>{ try{ if(seek>0 && seek < (audio.duration|| 1e9)) audio.currentTime=seek; }catch(e){} audio.removeEventListener('loadedmetadata', onMeta); };
     audio.addEventListener('loadedmetadata', onMeta);
   }catch(e){}
@@ -89,7 +91,7 @@ export async function playTrack(tr, fetchFn){
   if(fetchFn) await ensureQueue(tr.id, fetchFn);
   currentId.set(tr.id);
   if(!audio) return;
-  audio.src = `/api/library/${tr.id}/stream`;
+  audio.src = apiUrl(`/api/library/${tr.id}/stream`);
   audio.play();
   setTimeout(save,200);
 }
@@ -98,24 +100,24 @@ export function next(){
   if(get(shuffle)){
     if(!shuffleOrder.length) buildShuffle(q, get(queueIndex));
     shufflePos=(shufflePos+1)%shuffleOrder.length; const qi=shuffleOrder[shufflePos]; queueIndex.set(qi);
-    const nxt=q[qi]; if(nxt && audio){ currentId.set(nxt.id); audio.src=`/api/library/${nxt.id}/stream`; audio.play(); setTimeout(save,200); }
+    const nxt=q[qi]; if(nxt && audio){ currentId.set(nxt.id); audio.src=apiUrl(`/api/library/${nxt.id}/stream`); audio.play(); setTimeout(save,200); }
     return;
   }
   let qi=get(queueIndex);
   qi=(qi+1)%q.length; queueIndex.set(qi);
-  const nxt=q[qi]; if(nxt && audio){ currentId.set(nxt.id); audio.src=`/api/library/${nxt.id}/stream`; audio.play(); setTimeout(save,200); }
+  const nxt=q[qi]; if(nxt && audio){ currentId.set(nxt.id); audio.src=apiUrl(`/api/library/${nxt.id}/stream`); audio.play(); setTimeout(save,200); }
 }
 export function prev(){
   const q=get(queue); if(!q.length) return;
   if(get(shuffle)){
     if(!shuffleOrder.length) buildShuffle(q, get(queueIndex));
     shufflePos=(shufflePos-1+shuffleOrder.length)%shuffleOrder.length; const qi=shuffleOrder[shufflePos]; queueIndex.set(qi);
-    const prv=q[qi]; if(prv && audio){ currentId.set(prv.id); audio.src=`/api/library/${prv.id}/stream`; audio.play(); setTimeout(save,200); }
+    const prv=q[qi]; if(prv && audio){ currentId.set(prv.id); audio.src=apiUrl(`/api/library/${prv.id}/stream`); audio.play(); setTimeout(save,200); }
     return;
   }
   let qi=get(queueIndex);
   qi=(qi-1+q.length)%q.length; queueIndex.set(qi);
-  const prv=q[qi]; if(prv && audio){ currentId.set(prv.id); audio.src=`/api/library/${prv.id}/stream`; audio.play(); setTimeout(save,200); }
+  const prv=q[qi]; if(prv && audio){ currentId.set(prv.id); audio.src=apiUrl(`/api/library/${prv.id}/stream`); audio.play(); setTimeout(save,200); }
 }
 export function togglePlay(){ if(!audio) return; if(audio.paused) audio.play(); else audio.pause(); }
 export function seekTo(pct){

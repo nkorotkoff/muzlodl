@@ -2,7 +2,7 @@
 
   import { t, langStore } from '../lib/i18n.js';
   $: _lang = $langStore;
-  import { api, escapeHtml, debounce } from '../lib/api.js';
+  import { api, BASE, escapeHtml, debounce } from '../lib/api.js';
   import { onMount } from 'svelte';
   import { currentId as _pc, isPlaying as _isPlaying } from '../lib/player.js';
   let isPlayingVal=false; _isPlaying.subscribe(v=> isPlayingVal=v);
@@ -62,7 +62,7 @@
     const m=document.cookie.match('(?:^|;\\s*)csrf_token=([^;]*)');
     const token=m?decodeURIComponent(m[1]):'';
     const headers= token ? {'X-CSRF-Token': token} : {};
-    const r=await fetch('/api/library/upload', {method:'POST', headers, body: fd});
+    const r=await fetch(BASE + '/api/library/upload', {method:'POST', headers, body: fd});
     if(!r.ok){ const e=await r.json().catch(()=>({error:r.statusText})); alert(e.error); return; }
     showUpload=false; uploadFile=null; load(true);
   }
@@ -106,8 +106,8 @@
   <div class="toolbar">
     <input type="search" placeholder={t('library.searchPlaceholder')} value={query} on:input={onSearchInput} autofocus>
     <button on:click={showUploadModal} class="btn-action">{t('library.btn.upload')}</button>
-    <button on:click={async ()=>{ const fmt='csv'; const r=await fetch(`/api/library/export?format=${fmt}`); const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`library.${fmt}`; a.click(); URL.revokeObjectURL(url); }} class="btn-action">⬇ CSV</button>
-    <button on:click={async ()=>{ const fmt='json'; const r=await fetch(`/api/library/export?format=${fmt}`); const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`library.${fmt}`; a.click(); URL.revokeObjectURL(url); }} class="btn-action">⬇ JSON</button>
+    <button on:click={async ()=>{ const fmt='csv'; const r=await fetch(BASE + `/api/library/export?format=${fmt}`); const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`library.${fmt}`; a.click(); URL.revokeObjectURL(url); }} class="btn-action">⬇ CSV</button>
+    <button on:click={async ()=>{ const fmt='json'; const r=await fetch(BASE + `/api/library/export?format=${fmt}`); const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`library.${fmt}`; a.click(); URL.revokeObjectURL(url); }} class="btn-action">⬇ JSON</button>
     <span class="count">{tracks.length} / {total}</span>
   </div>
   {#if selected.size}

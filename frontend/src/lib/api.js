@@ -2,7 +2,9 @@ export function getCookie(name) {
   const m = document.cookie.match('(?:^|;\\s*)' + name + '=([^;]*)');
   return m ? decodeURIComponent(m[1]) : '';
 }
+export const BASE = (typeof document !== 'undefined' && document.querySelector('base')?.getAttribute('href')?.replace(/\/$/, '')) || '';
 export async function api(path, opts = {}) {
+  if (path.startsWith('/')) path = BASE + path;
   const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json', ...(opts.headers || {}) };
   const method = (opts.method || 'GET').toUpperCase();
   if (!['GET','HEAD','OPTIONS'].includes(method)) {

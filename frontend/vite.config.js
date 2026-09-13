@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [svelte()],
-  base: '/',
+  base: process.env.VITE_BASE || '/',
   build: {
     outDir: '../loader/web/static/dist',
     emptyOutDir: true,

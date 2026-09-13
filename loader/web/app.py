@@ -42,7 +42,8 @@ def _load_secret_key() -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
+    prefix = os.environ.get("APP_PREFIX", "").rstrip("/")
+    app = Flask(__name__, static_folder=str(STATIC), static_url_path=f"{prefix}/static")
     app.secret_key = _load_secret_key()
 
     # Session cookie hardening: HttpOnly (default), SameSite=Lax so the
@@ -59,29 +60,38 @@ def create_app() -> Flask:
 
     # ---- Auth ----
     # Public paths: setup wizard, login, static assets
+    # All paths are evaluated relative to APP_PREFIX (see _strip_prefix below).
     PUBLIC_PATHS = ("/setup", "/api/setup", "/login", "/api/login")
+
+    def _strip_prefix(path: str) -> str:
+        if prefix and path.startswith(prefix + "/"):
+            return path[len(prefix):]
+        if prefix and path == prefix:
+            return "/"
+        return path
 
     @app.before_request
     def _check_auth():
-        if request.path.startswith("/static/") or request.path.startswith("/assets/"):
+        path = _strip_prefix(request.path)
+        if path.startswith("/static/") or path.startswith("/assets/"):
             return None
         # CSRF: every state-changing request must carry a token matching
         # the csrf_token cookie (double-submit). Login/setup are included —
         # they change state too.
         if request.method in security.MUTATING_METHODS and not security.check_csrf():
             return security.csrf_error()
-        if request.path in PUBLIC_PATHS:
+        if path in PUBLIC_PATHS:
             return None
         if not auth.setup_done():
             # First run: force admin registration before anything else
-            if request.path.startswith("/api/"):
+            if path.startswith("/api/"):
                 return jsonify({"error": "setup required"}), 401
-            return flask.redirect("/setup")
+            return flask.redirect(f"{prefix}/setup")
         if session.get("authed"):
             return None
-        if request.path.startswith("/api/"):
+        if path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
-        return flask.redirect("/login")
+        return flask.redirect(f"{prefix}/login")
 
     @app.after_request
     def _hardening(response):
@@ -90,12 +100,14 @@ def create_app() -> Flask:
         return response
 
     @app.route("/setup")
+    @app.route(f"{prefix}/setup")
     def setup_page():
         if auth.setup_done():
-            return flask.redirect("/login")
-        return send_from_directory(str(STATIC), "setup.html")
+            return flask.redirect(f"{prefix}/login")
+        return _serve_static_page("setup.html")
 
     @app.route("/api/setup", methods=["POST"])
+    @app.route(f"{prefix}/api/setup", methods=["POST"])
     def api_setup():
         if auth.setup_done():
             return jsonify({"error": "already set up"}), 400
@@ -117,10 +129,12 @@ def create_app() -> Flask:
         return jsonify({"ok": True})
 
     @app.route("/login")
+    @app.route(f"{prefix}/login")
     def login_page():
-        return send_from_directory(str(STATIC), "login.html")
+        return _serve_static_page("login.html")
 
     @app.route("/api/login", methods=["POST"])
+    @app.route(f"{prefix}/api/login", methods=["POST"])
     def api_login():
         if not security.login_limiter.allowed(security.client_ip()):
             return jsonify({"error": "too many attempts, try later"}), 429
@@ -142,26 +156,56 @@ def create_app() -> Flask:
         return jsonify({"error": "wrong username or password"}), 401
 
     @app.route("/api/logout", methods=["POST"])
+    @app.route(f"{prefix}/api/logout", methods=["POST"])
     def api_logout():
         session.pop("authed", None)
         return jsonify({"ok": True})
 
+    p = prefix or ""
+    app.config["APP_PREFIX"] = p
+
+    def _serve_static_page(name: str):
+        """Serve login.html/setup.html with /static/ rewritten to {prefix}/static/."""
+        text = (STATIC / name).read_text(encoding="utf-8")
+        if p:
+            text = text.replace('href="/static/', f'href="{p}/static/')
+            text = text.replace('src="/static/', f'src="{p}/static/')
+            text = text.replace("fetch('/api/", f"fetch('{p}/api/")
+            text = text.replace('location.href = \'/\'', f'location.href = \'{p}/\'')
+            if "<base " not in text:
+                text = text.replace("<head>", f'<head>\n    <base href="{p}/">', 1)
+        return flask.Response(text, mimetype="text/html")
+
     # ---- App pages ---- Svelte SPA (hash router) ----
     @app.route("/")
+    @app.route(f"{p}/")
     @app.route("/search")
+    @app.route(f"{p}/search")
     @app.route("/import")
+    @app.route(f"{p}/import")
     @app.route("/settings")
+    @app.route(f"{p}/settings")
     @app.route("/stats")
+    @app.route(f"{p}/stats")
     def spa_index():
         # dist/index.html expects hash router (#/import); direct /import also serves SPA
-        return send_from_directory(str(STATIC_DIST), "index.html")
+        text = (STATIC_DIST / "index.html").read_text(encoding="utf-8")
+        if p and "<base " not in text:
+            text = text.replace("<head>", f'<head>\n    <base href="{p}/">', 1)
+        return flask.Response(text, mimetype="text/html")
 
     @app.route("/app")
     @app.route("/app/<path:path>")
+    @app.route(f"{p}/app")
+    @app.route(f"{p}/app/<path:path>")
     def spa_app(path=""):
-        return send_from_directory(str(STATIC_DIST), "index.html")
+        text = (STATIC_DIST / "index.html").read_text(encoding="utf-8")
+        if p and "<base " not in text:
+            text = text.replace("<head>", f'<head>\n    <base href="{p}/">', 1)
+        return flask.Response(text, mimetype="text/html")
 
     @app.route("/assets/<path:path>")
+    @app.route(f"{p}/assets/<path:path>")
     def spa_assets(path):
         return send_from_directory(str(STATIC_DIST / "assets"), path)
 
@@ -173,12 +217,12 @@ def create_app() -> Flask:
     from .routes_cloud import bp as cloud_bp
     from .routes_stats import bp as stats_bp
 
-    app.register_blueprint(library_bp)
-    app.register_blueprint(download_bp)
-    app.register_blueprint(search_bp)
-    app.register_blueprint(settings_bp)
-    app.register_blueprint(cloud_bp)
-    app.register_blueprint(stats_bp)
+    app.register_blueprint(library_bp, url_prefix=p or None)
+    app.register_blueprint(download_bp, url_prefix=p or None)
+    app.register_blueprint(search_bp, url_prefix=p or None)
+    app.register_blueprint(settings_bp, url_prefix=p or None)
+    app.register_blueprint(cloud_bp, url_prefix=p or None)
+    app.register_blueprint(stats_bp, url_prefix=p or None)
 
     # Auto-index existing files and log on first run
     auto_scan()

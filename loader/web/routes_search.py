@@ -22,6 +22,14 @@ log = logging.getLogger(__name__)
 bp = Blueprint("search", __name__)
 
 
+def _prefixed(*parts: str) -> str:
+    """stream_url relative to the app root (APP_PREFIX-aware)."""
+    from flask import current_app
+
+    base = (current_app.config.get("APP_PREFIX") or "").rstrip("/")
+    return base + "/" + "/".join(p.strip("/") for p in parts)
+
+
 @bp.route("/api/search")
 def api_search():
     """Search across enabled sources."""
@@ -191,7 +199,9 @@ def api_preview_start():
 
     return jsonify({
         "job_id": job_id,
-        "stream_url": f"/api/preview/{job_id}/stream",
+        # stream_url is built from the request path so it works
+        # both directly (:8080/...) and behind a prefix (/music/...).
+        "stream_url": _prefixed("/api/preview", job_id, "stream"),
     })
 
 
